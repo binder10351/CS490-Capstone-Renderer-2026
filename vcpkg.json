@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "cs490-capstone-renderer",
+  "version-string": "0.1.0",
+  "dependencies": [
+    {
+      "name": "sdl3",
+      "features": ["vulkan"]
+    },
+    "vulkan-memory-allocator"
+  ]
+}

@@ -1,0 +1,16 @@
+/build/
+/out/
+/.vs/
+/.vscode/
+*.user
+*.suo
+# Local CMake configuration
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+compile_commands.json
+Testing/
+
+# Manifest-mode vcpkg, if configured outside build/
+vcpkg_installed/
