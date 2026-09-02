@@ -1,4 +1,5 @@
 #include "Application.hpp"
+#include "renderer/Renderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -17,9 +18,12 @@ Application::Application() {
         SDL_Quit();
         throw std::runtime_error(error);
     }
+
+    renderer_ = std::make_unique<Renderer>(window_);
 }
 
 Application::~Application() {
+    renderer_.reset();
     if (window_ != nullptr) {
         SDL_DestroyWindow(window_);
     }
@@ -36,7 +40,7 @@ int Application::run() {
             }
         }
 
-        // Renderer::drawFrame() will be called here after Vulkan initialization.
+        renderer_->drawFrame();
     }
     return 0;
 }

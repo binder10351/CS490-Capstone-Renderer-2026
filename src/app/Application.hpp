@@ -2,6 +2,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <memory>
+
+class Renderer;
+
 class Application {
 public:
     Application();
@@ -14,4 +18,5 @@ public:
 
 private:
     SDL_Window* window_ = nullptr;
+    std::unique_ptr<Renderer> renderer_;
 };

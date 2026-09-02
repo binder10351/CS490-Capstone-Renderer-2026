@@ -38,6 +38,22 @@ target_link_libraries(gltf_viewer PRIVATE
 
 target_compile_features(gltf_viewer PRIVATE cxx_std_20)
 
+set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+set(SHADERS fullscreen.vert fullscreen.frag)
+foreach(SHADER IN LISTS SHADERS)
+    add_custom_command(
+        OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER}.spv"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
+                -o "${SHADER_OUTPUT_DIR}/${SHADER}.spv"
+        DEPENDS "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
+        VERBATIM
+    )
+    list(APPEND SPIRV_SHADERS "${SHADER_OUTPUT_DIR}/${SHADER}.spv")
+endforeach()
+add_custom_target(shaders DEPENDS ${SPIRV_SHADERS})
+add_dependencies(gltf_viewer shaders)
+
 if(MSVC)
     target_compile_options(gltf_viewer PRIVATE /W4 /permissive-)
 else()
@@ -46,6 +62,6 @@ endif()
 
 add_custom_command(TARGET gltf_viewer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/shaders
+            ${SHADER_OUTPUT_DIR}
             $<TARGET_FILE_DIR:gltf_viewer>/shaders
 )
