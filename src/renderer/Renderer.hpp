@@ -39,6 +39,16 @@ private:
     VmaAllocationCreateFlags allocationFlags = 0
 );
 void destroyBuffer(GpuBuffer& buffer);
+void copyBuffer(
+    VkBuffer source,
+    VkBuffer destination,
+    VkDeviceSize size
+);
+GpuBuffer uploadBuffer(
+    const void* data,
+    VkDeviceSize size,
+    VkBufferUsageFlags finalUsage
+);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();

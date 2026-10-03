@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -194,7 +195,120 @@ void Renderer::destroyBuffer(GpuBuffer& buffer) {
         buffer.size = 0;
     }
 }
+void Renderer::copyBuffer(
+    VkBuffer source,
+    VkBuffer destination,
+    VkDeviceSize size
+) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool_;
+    allocInfo.commandBufferCount = 1;
 
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+
+    if (vkAllocateCommandBuffers(
+            device_,
+            &allocInfo,
+            &commandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate copy command buffer");
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+        throw std::runtime_error("Failed to begin copy command buffer");
+    }
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+
+    vkCmdCopyBuffer(
+        commandBuffer,
+        source,
+        destination,
+        1,
+        &copyRegion
+    );
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+        throw std::runtime_error("Failed to end copy command buffer");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    if (vkQueueSubmit(
+            graphicsQueue_,
+            1,
+            &submitInfo,
+            VK_NULL_HANDLE) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+        throw std::runtime_error("Failed to submit copy command");
+    }
+
+    vkQueueWaitIdle(graphicsQueue_);
+
+    vkFreeCommandBuffers(
+        device_,
+        commandPool_,
+        1,
+        &commandBuffer
+    );
+}
+GpuBuffer Renderer::uploadBuffer(
+    const void* data,
+    VkDeviceSize size,
+    VkBufferUsageFlags finalUsage
+) {
+    GpuBuffer stagingBuffer = createBuffer(
+        size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    );
+    void* mappedData = nullptr;
+
+if (vmaMapMemory(
+        allocator_,
+        stagingBuffer.allocation,
+        &mappedData) != VK_SUCCESS) {
+    destroyBuffer(stagingBuffer);
+    throw std::runtime_error("Failed to map staging buffer memory");
+}
+std::memcpy(
+    mappedData,
+    data,
+    static_cast<std::size_t>(size)
+);
+
+vmaUnmapMemory(
+    allocator_,
+    stagingBuffer.allocation
+);
+GpuBuffer gpuBuffer = createBuffer(
+    size,
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT | finalUsage,
+    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+);
+copyBuffer(
+    stagingBuffer.buffer,
+    gpuBuffer.buffer,
+    size
+);
+destroyBuffer(stagingBuffer);
+
+    return gpuBuffer;
+}
 
 void Renderer::createSwapchain() {
     VkSurfaceCapabilitiesKHR capabilities;
