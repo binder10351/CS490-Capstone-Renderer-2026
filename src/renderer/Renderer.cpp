@@ -1,3 +1,4 @@
+#define VMA_IMPLEMENTATION
 #include "Renderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
@@ -49,6 +50,7 @@ std::filesystem::path shaderDirectory() {
 
 Renderer::Renderer(SDL_Window* window) : window_(window) {
     createInstance(); createSurface(); pickPhysicalDevice(); createDevice();
+    createAllocator();
     createSwapchain(); createRenderPass(); createPipeline(); createFramebuffers();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
 }
@@ -63,6 +65,7 @@ Renderer::~Renderer() {
         }
         vkDestroyCommandPool(device_, commandPool_, nullptr);
         destroySwapchain();
+        destroyAllocator();
         vkDestroyDevice(device_, nullptr);
     }
     if (surface_ != VK_NULL_HANDLE) vkDestroySurfaceKHR(instance_, surface_, nullptr);
@@ -133,6 +136,17 @@ void Renderer::createDevice() {
     check(vkCreateDevice(physicalDevice_, &info, nullptr, &device_), "Creating logical device");
     vkGetDeviceQueue(device_, queueFamilies_.graphics, 0, &graphicsQueue_);
     vkGetDeviceQueue(device_, queueFamilies_.present, 0, &presentQueue_);
+}
+
+void Renderer::createAllocator() {
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.instance = instance_;
+    allocatorInfo.physicalDevice = physicalDevice_;
+    allocatorInfo.device = device_;
+
+    if (vmaCreateAllocator(&allocatorInfo, &allocator_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create VMA allocator");
+    }
 }
 
 void Renderer::createSwapchain() {
@@ -282,4 +296,11 @@ void Renderer::destroySwapchain() {
     swapchainImageViews_.clear();
     if (swapchain_ != VK_NULL_HANDLE) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
     swapchain_ = VK_NULL_HANDLE;
+}
+
+void Renderer::destroyAllocator() {
+    if (allocator_ != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(allocator_);
+        allocator_ = VK_NULL_HANDLE;
+    }
 }

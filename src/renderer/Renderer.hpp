@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 
 #include <array>
 #include <cstdint>
@@ -29,8 +30,10 @@ private:
     void createSurface();
     void pickPhysicalDevice();
     void createDevice();
+    void createAllocator();
     void createSwapchain();
     void destroySwapchain();
+    void destroyAllocator();
     void createRenderPass();
     void createPipeline();
     void createFramebuffers();
@@ -47,6 +50,7 @@ private:
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     QueueFamilies queueFamilies_{};
