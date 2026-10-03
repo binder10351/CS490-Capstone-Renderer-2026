@@ -138,6 +138,7 @@ void Renderer::createDevice() {
     vkGetDeviceQueue(device_, queueFamilies_.present, 0, &presentQueue_);
 }
 
+
 void Renderer::createAllocator() {
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.instance = instance_;
@@ -148,6 +149,52 @@ void Renderer::createAllocator() {
         throw std::runtime_error("Failed to create VMA allocator");
     }
 }
+
+GpuBuffer Renderer::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memoryUsage,
+    VmaAllocationCreateFlags allocationFlags
+) {
+    GpuBuffer gpuBuffer{};
+    gpuBuffer.size = size;
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocationInfo{};
+    allocationInfo.usage = memoryUsage;
+    allocationInfo.flags = allocationFlags;
+
+    if (vmaCreateBuffer(
+            allocator_,
+            &bufferInfo,
+            &allocationInfo,
+            &gpuBuffer.buffer,
+            &gpuBuffer.allocation,
+            nullptr) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create GPU buffer");
+    }
+
+    return gpuBuffer;
+}
+void Renderer::destroyBuffer(GpuBuffer& buffer) {
+    if (buffer.buffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(
+            allocator_,
+            buffer.buffer,
+            buffer.allocation
+        );
+
+        buffer.buffer = VK_NULL_HANDLE;
+        buffer.allocation = VK_NULL_HANDLE;
+        buffer.size = 0;
+    }
+}
+
 
 void Renderer::createSwapchain() {
     VkSurfaceCapabilitiesKHR capabilities;

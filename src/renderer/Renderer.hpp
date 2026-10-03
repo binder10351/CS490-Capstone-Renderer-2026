@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include "GpuResources.hpp"
 
 #include <array>
 #include <cstdint>
@@ -31,6 +32,13 @@ private:
     void pickPhysicalDevice();
     void createDevice();
     void createAllocator();
+    GpuBuffer createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memoryUsage,
+    VmaAllocationCreateFlags allocationFlags = 0
+);
+void destroyBuffer(GpuBuffer& buffer);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();
