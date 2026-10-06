@@ -57,6 +57,32 @@ GpuBuffer createIndexBuffer(
     const void* indexData,
     VkDeviceSize size
 );
+GpuTexture createImage(
+    uint32_t width,
+    uint32_t height,
+    uint32_t mipLevels,
+    VkFormat format,
+    VkImageUsageFlags usage
+);
+void destroyImage(GpuTexture& texture);
+void transitionImageLayout(
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    uint32_t mipLevels
+);
+void copyBufferToImage(
+    VkBuffer buffer,
+    VkImage image,
+    uint32_t width,
+    uint32_t height
+);
+
+GpuTexture uploadTexture(
+    const void* pixelData,
+    uint32_t width,
+    uint32_t height
+);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();
