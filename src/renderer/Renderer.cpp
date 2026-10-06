@@ -464,6 +464,11 @@ void Renderer::updateUniformBuffer(
     const void* data,
     VkDeviceSize size
 ) {
+    if (size > buffer.size) {
+    throw std::runtime_error(
+        "Uniform data is larger than the uniform buffer"
+    );
+}
     void* mappedData = nullptr;
 
     if (vmaMapMemory(
@@ -995,7 +1000,11 @@ GpuTexture Renderer::uploadTexture(
     const void* pixelData,
     uint32_t width,
     uint32_t height
-) {const uint32_t mipLevels =
+) {if (pixelData == nullptr || width == 0 || height == 0) {
+    throw std::runtime_error(
+        "Cannot upload an empty texture"
+    );
+}const uint32_t mipLevels =
     static_cast<uint32_t>(
         std::floor(
             std::log2(
