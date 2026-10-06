@@ -54,6 +54,9 @@ Renderer::Renderer(SDL_Window* window) : window_(window) {
     createInstance(); createSurface(); pickPhysicalDevice(); createDevice();
     createAllocator();
     createDescriptorSetLayouts();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createSwapchain(); createRenderPass(); createPipeline(); createFramebuffers();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
 }
@@ -68,6 +71,42 @@ Renderer::~Renderer() {
         }
         vkDestroyCommandPool(device_, commandPool_, nullptr);
         destroySwapchain();
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+    vkDestroyDescriptorPool(
+        device_,
+        descriptorPool_,
+        nullptr
+    );
+
+    descriptorPool_ = VK_NULL_HANDLE;
+}
+
+if (materialDescriptorSetLayout_ != VK_NULL_HANDLE) {
+    vkDestroyDescriptorSetLayout(
+        device_,
+        materialDescriptorSetLayout_,
+        nullptr
+    );
+
+    materialDescriptorSetLayout_ = VK_NULL_HANDLE;
+}
+
+if (frameDescriptorSetLayout_ != VK_NULL_HANDLE) {
+    vkDestroyDescriptorSetLayout(
+        device_,
+        frameDescriptorSetLayout_,
+        nullptr
+    );
+
+    frameDescriptorSetLayout_ = VK_NULL_HANDLE;
+}
+        for (auto& buffer : frameUniformBuffers_) {
+    destroyBuffer(buffer);
+}
+
+for (auto& buffer : lightingUniformBuffers_) {
+    destroyBuffer(buffer);
+}
         destroyAllocator();
         vkDestroyDevice(device_, nullptr);
     }
@@ -462,6 +501,15 @@ void Renderer::updateUniformBuffer(
         buffer.allocation
     );
 }
+void Renderer::createUniformBuffers() {
+    for (std::uint32_t i = 0; i < maxFramesInFlight; ++i) {
+        frameUniformBuffers_[i] =
+            createUniformBuffer(sizeof(FrameUniforms));
+
+        lightingUniformBuffers_[i] =
+            createUniformBuffer(sizeof(LightingUniforms));
+    }
+}
 void Renderer::createDescriptorSetLayouts() {
     std::array<VkDescriptorSetLayoutBinding, 2> frameBindings{};
 
@@ -547,6 +595,71 @@ void Renderer::createDescriptorPool() {
             &descriptorPool_) != VK_SUCCESS) {
         throw std::runtime_error(
             "Failed to create descriptor pool"
+        );
+    }
+}
+void Renderer::createDescriptorSets() {
+    std::array<VkDescriptorSetLayout, maxFramesInFlight> layouts{};
+    layouts.fill(frameDescriptorSetLayout_);
+
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = descriptorPool_;
+    allocateInfo.descriptorSetCount = maxFramesInFlight;
+    allocateInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(
+            device_,
+            &allocateInfo,
+            frameDescriptorSets_.data()) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to allocate frame descriptor sets"
+        );
+    }
+
+    for (std::uint32_t i = 0; i < maxFramesInFlight; ++i) {
+        VkDescriptorBufferInfo frameBufferInfo{};
+        frameBufferInfo.buffer = frameUniformBuffers_[i].buffer;
+        frameBufferInfo.offset = 0;
+        frameBufferInfo.range = sizeof(FrameUniforms);
+
+        VkDescriptorBufferInfo lightingBufferInfo{};
+        lightingBufferInfo.buffer =
+            lightingUniformBuffers_[i].buffer;
+        lightingBufferInfo.offset = 0;
+        lightingBufferInfo.range = sizeof(LightingUniforms);
+
+        std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+
+        descriptorWrites[0].sType =
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet =
+            frameDescriptorSets_[i];
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo =
+            &frameBufferInfo;
+
+        descriptorWrites[1].sType =
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet =
+            frameDescriptorSets_[i];
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pBufferInfo =
+            &lightingBufferInfo;
+
+        vkUpdateDescriptorSets(
+            device_,
+            static_cast<uint32_t>(descriptorWrites.size()),
+            descriptorWrites.data(),
+            0,
+            nullptr
         );
     }
 }

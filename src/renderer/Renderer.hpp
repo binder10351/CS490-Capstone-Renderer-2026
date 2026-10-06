@@ -65,9 +65,11 @@ void updateUniformBuffer(
     const void* data,
     VkDeviceSize size
 );
+void createUniformBuffers();
 void createDescriptorSetLayouts();
 
 void createDescriptorPool();
+void createDescriptorSets();
 GpuTexture createImage(
     uint32_t width,
     uint32_t height,
@@ -75,6 +77,7 @@ GpuTexture createImage(
     VkFormat format,
     VkImageUsageFlags usage
 );
+
 void destroyImage(GpuTexture& texture);
 void transitionImageLayout(
     VkImage image,
@@ -136,6 +139,10 @@ VkDescriptorSetLayout materialDescriptorSetLayout_ =
     VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_ =
     VK_NULL_HANDLE;
+    std::array<GpuBuffer, maxFramesInFlight> frameUniformBuffers_{};
+
+std::array<GpuBuffer, maxFramesInFlight> lightingUniformBuffers_{};
+std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     QueueFamilies queueFamilies_{};
