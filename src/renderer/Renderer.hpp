@@ -91,6 +91,13 @@ VkImageView createImageView(
 VkSampler createTextureSampler(
     uint32_t mipLevels
 );
+void generateMipmaps(
+    VkImage image,
+    VkFormat imageFormat,
+    int32_t width,
+    int32_t height,
+    uint32_t mipLevels
+);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();
