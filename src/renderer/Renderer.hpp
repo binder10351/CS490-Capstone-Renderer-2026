@@ -66,6 +66,9 @@ void updateUniformBuffer(
     VkDeviceSize size
 );
 void createUniformBuffers();
+GpuMaterial createMaterial(
+    const MaterialUniforms& material
+);
 void createDescriptorSetLayouts();
 
 void createDescriptorPool();

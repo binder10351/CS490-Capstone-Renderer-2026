@@ -514,6 +514,66 @@ void Renderer::createUniformBuffers() {
         lightingUniformBuffers_[i] =
             createUniformBuffer(sizeof(LightingUniforms));
     }
+}GpuMaterial Renderer::createMaterial(
+    const MaterialUniforms& material
+) {
+    GpuMaterial gpuMaterial{};
+
+    gpuMaterial.uniformBuffer =
+        createUniformBuffer(sizeof(MaterialUniforms));
+
+    updateUniformBuffer(
+        gpuMaterial.uniformBuffer,
+        &material,
+        sizeof(MaterialUniforms)
+    );
+
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = descriptorPool_;
+    allocateInfo.descriptorSetCount = 1;
+    allocateInfo.pSetLayouts =
+        &materialDescriptorSetLayout_;
+
+    if (vkAllocateDescriptorSets(
+            device_,
+            &allocateInfo,
+            &gpuMaterial.descriptorSet) != VK_SUCCESS) {
+        destroyBuffer(gpuMaterial.uniformBuffer);
+
+        throw std::runtime_error(
+            "Failed to allocate material descriptor set"
+        );
+    }
+
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer =
+        gpuMaterial.uniformBuffer.buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(MaterialUniforms);
+
+    VkWriteDescriptorSet descriptorWrite{};
+    descriptorWrite.sType =
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrite.dstSet =
+        gpuMaterial.descriptorSet;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.descriptorType =
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pBufferInfo =
+        &bufferInfo;
+
+    vkUpdateDescriptorSets(
+        device_,
+        1,
+        &descriptorWrite,
+        0,
+        nullptr
+    );
+
+    return gpuMaterial;
 }
 void Renderer::createDescriptorSetLayouts() {
     std::array<VkDescriptorSetLayoutBinding, 2> frameBindings{};

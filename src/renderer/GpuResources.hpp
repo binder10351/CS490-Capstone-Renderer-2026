@@ -25,3 +25,7 @@ struct GpuTexture {
     uint32_t height = 0;
     uint32_t mipLevels = 1;
 };
+struct GpuMaterial {
+    GpuBuffer uniformBuffer;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+};
