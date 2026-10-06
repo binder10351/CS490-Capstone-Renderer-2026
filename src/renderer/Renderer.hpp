@@ -83,6 +83,14 @@ GpuTexture uploadTexture(
     uint32_t width,
     uint32_t height
 );
+VkImageView createImageView(
+    VkImage image,
+    VkFormat format,
+    uint32_t mipLevels
+);
+VkSampler createTextureSampler(
+    uint32_t mipLevels
+);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();
