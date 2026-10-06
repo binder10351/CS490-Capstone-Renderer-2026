@@ -4,7 +4,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include "GpuResources.hpp"
-
+#include "GpuUniforms.hpp"
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -57,6 +57,17 @@ GpuBuffer createIndexBuffer(
     const void* indexData,
     VkDeviceSize size
 );
+GpuBuffer createUniformBuffer(
+    VkDeviceSize size
+);
+void updateUniformBuffer(
+    GpuBuffer& buffer,
+    const void* data,
+    VkDeviceSize size
+);
+void createDescriptorSetLayouts();
+
+void createDescriptorPool();
 GpuTexture createImage(
     uint32_t width,
     uint32_t height,
@@ -118,6 +129,13 @@ void generateMipmaps(
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout frameDescriptorSetLayout_ =
+    VK_NULL_HANDLE;
+
+VkDescriptorSetLayout materialDescriptorSetLayout_ =
+    VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_ =
+    VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     QueueFamilies queueFamilies_{};

@@ -53,6 +53,7 @@ std::filesystem::path shaderDirectory() {
 Renderer::Renderer(SDL_Window* window) : window_(window) {
     createInstance(); createSurface(); pickPhysicalDevice(); createDevice();
     createAllocator();
+    createDescriptorSetLayouts();
     createSwapchain(); createRenderPass(); createPipeline(); createFramebuffers();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
 }
@@ -76,11 +77,58 @@ Renderer::~Renderer() {
 
 void Renderer::createInstance() {
     Uint32 count = 0;
-    const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
-    if (!extensions) throw std::runtime_error(SDL_GetError());
-    const VkApplicationInfo app{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "CS490 glTF Viewer", .applicationVersion = VK_MAKE_VERSION(0, 1, 0), .pEngineName = "CS490 Renderer", .engineVersion = VK_MAKE_VERSION(0, 1, 0), .apiVersion = VK_API_VERSION_1_0};
-    const VkInstanceCreateInfo info{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app, .enabledExtensionCount = count, .ppEnabledExtensionNames = extensions};
-    check(vkCreateInstance(&info, nullptr, &instance_), "Creating Vulkan instance");
+
+    const char* const* sdlExtensions =
+        SDL_Vulkan_GetInstanceExtensions(&count);
+
+    if (!sdlExtensions) {
+        throw std::runtime_error(SDL_GetError());
+    }
+
+    std::vector<const char*> extensions(
+        sdlExtensions,
+        sdlExtensions + count
+    );
+
+#ifdef __APPLE__
+    extensions.push_back(
+        VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+    );
+
+    extensions.push_back(
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+    );
+#endif
+
+    const VkApplicationInfo app{
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "CS490 glTF Viewer",
+        .applicationVersion = VK_MAKE_VERSION(0, 1, 0),
+        .pEngineName = "CS490 Renderer",
+        .engineVersion = VK_MAKE_VERSION(0, 1, 0),
+        .apiVersion = VK_API_VERSION_1_0
+    };
+
+    VkInstanceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    info.pApplicationInfo = &app;
+    info.enabledExtensionCount =
+        static_cast<uint32_t>(extensions.size());
+    info.ppEnabledExtensionNames = extensions.data();
+
+#ifdef __APPLE__
+    info.flags |=
+        VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+    check(
+        vkCreateInstance(
+            &info,
+            nullptr,
+            &instance_
+        ),
+        "Creating Vulkan instance"
+    );
 }
 
 void Renderer::createSurface() {
@@ -133,8 +181,18 @@ void Renderer::createDevice() {
     std::vector<VkDeviceQueueCreateInfo> queues;
     queues.push_back({.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = queueFamilies_.graphics, .queueCount = 1, .pQueuePriorities = &priority});
     if (queueFamilies_.present != queueFamilies_.graphics) queues.push_back({.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = queueFamilies_.present, .queueCount = 1, .pQueuePriorities = &priority});
-    const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    const VkDeviceCreateInfo info{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = static_cast<std::uint32_t>(queues.size()), .pQueueCreateInfos = queues.data(), .enabledExtensionCount = 1, .ppEnabledExtensionNames = extensions};
+    #ifdef __APPLE__
+    const char* extensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        "VK_KHR_portability_subset"
+    };
+#else
+    const char* extensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+#endif
+    const VkDeviceCreateInfo info{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = static_cast<std::uint32_t>(queues.size()), .pQueueCreateInfos = queues.data(), .enabledExtensionCount =
+    static_cast<uint32_t>(std::size(extensions)), .ppEnabledExtensionNames = extensions};
     check(vkCreateDevice(physicalDevice_, &info, nullptr, &device_), "Creating logical device");
     vkGetDeviceQueue(device_, queueFamilies_.graphics, 0, &graphicsQueue_);
     vkGetDeviceQueue(device_, queueFamilies_.present, 0, &presentQueue_);
@@ -351,6 +409,146 @@ GpuBuffer Renderer::createIndexBuffer(
         size,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT
     );
+}
+GpuBuffer Renderer::createUniformBuffer(
+    VkDeviceSize size
+) {
+    return createBuffer(
+        size,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    );
+}
+void Renderer::updateUniformBuffer(
+    GpuBuffer& buffer,
+    const void* data,
+    VkDeviceSize size
+) {
+    void* mappedData = nullptr;
+
+    if (vmaMapMemory(
+            allocator_,
+            buffer.allocation,
+            &mappedData) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to map uniform buffer memory"
+        );
+    }
+
+    std::memcpy(
+        mappedData,
+        data,
+        static_cast<std::size_t>(size)
+    );
+
+    if (vmaFlushAllocation(
+            allocator_,
+            buffer.allocation,
+            0,
+            size) != VK_SUCCESS) {
+        vmaUnmapMemory(
+            allocator_,
+            buffer.allocation
+        );
+
+        throw std::runtime_error(
+            "Failed to flush uniform buffer memory"
+        );
+    }
+
+    vmaUnmapMemory(
+        allocator_,
+        buffer.allocation
+    );
+}
+void Renderer::createDescriptorSetLayouts() {
+    std::array<VkDescriptorSetLayoutBinding, 2> frameBindings{};
+
+    frameBindings[0].binding = 0;
+    frameBindings[0].descriptorType =
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    frameBindings[0].descriptorCount = 1;
+    frameBindings[0].stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT;
+
+    frameBindings[1].binding = 1;
+    frameBindings[1].descriptorType =
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    frameBindings[1].descriptorCount = 1;
+    frameBindings[1].stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo frameLayoutInfo{};
+    frameLayoutInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    frameLayoutInfo.bindingCount =
+        static_cast<uint32_t>(frameBindings.size());
+    frameLayoutInfo.pBindings = frameBindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device_,
+            &frameLayoutInfo,
+            nullptr,
+            &frameDescriptorSetLayout_) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create frame descriptor set layout"
+        );
+    }
+
+    VkDescriptorSetLayoutBinding materialBinding{};
+    materialBinding.binding = 0;
+    materialBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    materialBinding.descriptorCount = 1;
+    materialBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo materialLayoutInfo{};
+    materialLayoutInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    materialLayoutInfo.bindingCount = 1;
+    materialLayoutInfo.pBindings = &materialBinding;
+
+    if (vkCreateDescriptorSetLayout(
+            device_,
+            &materialLayoutInfo,
+            nullptr,
+            &materialDescriptorSetLayout_) != VK_SUCCESS) {
+        vkDestroyDescriptorSetLayout(
+            device_,
+            frameDescriptorSetLayout_,
+            nullptr
+        );
+
+        frameDescriptorSetLayout_ = VK_NULL_HANDLE;
+
+        throw std::runtime_error(
+            "Failed to create material descriptor set layout"
+        );
+    }
+}
+void Renderer::createDescriptorPool() {
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = 32;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 16;
+
+    if (vkCreateDescriptorPool(
+            device_,
+            &poolInfo,
+            nullptr,
+            &descriptorPool_) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create descriptor pool"
+        );
+    }
 }
 GpuTexture Renderer::createImage(
     uint32_t width,
@@ -758,7 +956,7 @@ GpuTexture Renderer::uploadTexture(
         texture.image,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1
+        mipLevels
     );
 
     copyBufferToImage(
@@ -1168,7 +1366,17 @@ void Renderer::createPipeline() {
     const VkPipelineColorBlendStateCreateInfo blend{.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &blendAttachment};
     const VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     const VkPipelineDynamicStateCreateInfo dynamic{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = states};
-    const VkPipelineLayoutCreateInfo layout{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts = {
+    frameDescriptorSetLayout_,
+    materialDescriptorSetLayout_
+};
+
+const VkPipelineLayoutCreateInfo layout{
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    .setLayoutCount =
+        static_cast<uint32_t>(descriptorSetLayouts.size()),
+    .pSetLayouts = descriptorSetLayouts.data()
+};
     check(vkCreatePipelineLayout(device_, &layout, nullptr, &pipelineLayout_), "Creating pipeline layout");
     const VkGraphicsPipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2, .pStages = stages, .pVertexInputState = &vertexInput, .pInputAssemblyState = &assembly, .pViewportState = &viewport, .pRasterizationState = &rasterizer, .pMultisampleState = &multisample, .pColorBlendState = &blend, .pDynamicState = &dynamic, .layout = pipelineLayout_, .renderPass = renderPass_};
     const VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_);
