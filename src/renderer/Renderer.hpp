@@ -49,6 +49,14 @@ GpuBuffer uploadBuffer(
     VkDeviceSize size,
     VkBufferUsageFlags finalUsage
 );
+GpuBuffer createVertexBuffer(
+    const void* vertexData,
+    VkDeviceSize size
+);
+GpuBuffer createIndexBuffer(
+    const void* indexData,
+    VkDeviceSize size
+);
     void createSwapchain();
     void destroySwapchain();
     void destroyAllocator();

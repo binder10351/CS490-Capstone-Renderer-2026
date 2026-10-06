@@ -309,6 +309,26 @@ destroyBuffer(stagingBuffer);
 
     return gpuBuffer;
 }
+GpuBuffer Renderer::createVertexBuffer(
+    const void* vertexData,
+    VkDeviceSize size
+) {
+    return uploadBuffer(
+        vertexData,
+        size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+}
+GpuBuffer Renderer::createIndexBuffer(
+    const void* indexData,
+    VkDeviceSize size
+) {
+    return uploadBuffer(
+        indexData,
+        size,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+    );
+}
 
 void Renderer::createSwapchain() {
     VkSurfaceCapabilitiesKHR capabilities;

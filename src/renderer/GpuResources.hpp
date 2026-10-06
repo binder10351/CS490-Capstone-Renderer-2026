@@ -8,7 +8,13 @@ struct GpuBuffer {
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkDeviceSize size = 0;
 };
+struct GpuMesh {
+    GpuBuffer vertexBuffer;
+    GpuBuffer indexBuffer;
 
+    uint32_t vertexCount = 0;
+    uint32_t indexCount = 0;
+};
 struct GpuTexture {
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
