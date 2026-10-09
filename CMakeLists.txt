@@ -39,7 +39,13 @@ target_link_libraries(gltf_viewer PRIVATE
 target_compile_features(gltf_viewer PRIVATE cxx_std_20)
 
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-set(SHADERS fullscreen.vert fullscreen.frag)
+set(SHADERS
+    fullscreen.vert
+    fullscreen.frag
+    gltf_mesh.vert
+    gltf_lit.frag
+    gltf_ggx.frag
+)
 foreach(SHADER IN LISTS SHADERS)
     add_custom_command(
         OUTPUT "${SHADER_OUTPUT_DIR}/${SHADER}.spv"
