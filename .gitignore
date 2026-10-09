@@ -11,6 +11,6 @@ CMakeFiles/
 cmake-build-*/
 compile_commands.json
 Testing/
-
+build-vcpkg/
 # Manifest-mode vcpkg, if configured outside build/
 vcpkg_installed/
