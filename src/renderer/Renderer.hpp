@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
-
+#include <vk_mem_alloc.h>
+#include "GpuResources.hpp"
+#include "GpuUniforms.hpp"
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -29,8 +31,93 @@ private:
     void createSurface();
     void pickPhysicalDevice();
     void createDevice();
+    void createAllocator();
+    GpuBuffer createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memoryUsage,
+    VmaAllocationCreateFlags allocationFlags = 0
+);
+void destroyBuffer(GpuBuffer& buffer);
+void copyBuffer(
+    VkBuffer source,
+    VkBuffer destination,
+    VkDeviceSize size
+);
+GpuBuffer uploadBuffer(
+    const void* data,
+    VkDeviceSize size,
+    VkBufferUsageFlags finalUsage
+);
+GpuBuffer createVertexBuffer(
+    const void* vertexData,
+    VkDeviceSize size
+);
+GpuBuffer createIndexBuffer(
+    const void* indexData,
+    VkDeviceSize size
+);
+GpuBuffer createUniformBuffer(
+    VkDeviceSize size
+);
+void updateUniformBuffer(
+    GpuBuffer& buffer,
+    const void* data,
+    VkDeviceSize size
+);
+void createUniformBuffers();
+GpuMaterial createMaterial(
+    const MaterialUniforms& material
+);
+void createDescriptorSetLayouts();
+
+void createDescriptorPool();
+void createDescriptorSets();
+GpuTexture createImage(
+    uint32_t width,
+    uint32_t height,
+    uint32_t mipLevels,
+    VkFormat format,
+    VkImageUsageFlags usage
+);
+
+void destroyImage(GpuTexture& texture);
+void transitionImageLayout(
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    uint32_t mipLevels
+);
+void copyBufferToImage(
+    VkBuffer buffer,
+    VkImage image,
+    uint32_t width,
+    uint32_t height
+);
+
+GpuTexture uploadTexture(
+    const void* pixelData,
+    uint32_t width,
+    uint32_t height
+);
+VkImageView createImageView(
+    VkImage image,
+    VkFormat format,
+    uint32_t mipLevels
+);
+VkSampler createTextureSampler(
+    uint32_t mipLevels
+);
+void generateMipmaps(
+    VkImage image,
+    VkFormat imageFormat,
+    int32_t width,
+    int32_t height,
+    uint32_t mipLevels
+);
     void createSwapchain();
     void destroySwapchain();
+    void destroyAllocator();
     void createRenderPass();
     void createPipeline();
     void createFramebuffers();
@@ -47,6 +134,18 @@ private:
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout frameDescriptorSetLayout_ =
+    VK_NULL_HANDLE;
+
+VkDescriptorSetLayout materialDescriptorSetLayout_ =
+    VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_ =
+    VK_NULL_HANDLE;
+    std::array<GpuBuffer, maxFramesInFlight> frameUniformBuffers_{};
+
+std::array<GpuBuffer, maxFramesInFlight> lightingUniformBuffers_{};
+std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     QueueFamilies queueFamilies_{};
