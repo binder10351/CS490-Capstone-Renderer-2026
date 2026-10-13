@@ -96,9 +96,11 @@ void copyBufferToImage(
 );
 
 GpuTexture uploadTexture(
+    // Tightly packed RGBA8 pixels; normal and ORM maps ignore alpha.
     const void* pixelData,
     uint32_t width,
-    uint32_t height
+    uint32_t height,
+    TextureSemantic semantic = TextureSemantic::Color
 );
 VkImageView createImageView(
     VkImage image,
@@ -119,6 +121,7 @@ void generateMipmaps(
     void destroySwapchain();
     void destroyAllocator();
     void createRenderPass();
+    void createDepthResources();
     void createPipeline();
     void createFramebuffers();
     void createCommandPool();
@@ -154,6 +157,9 @@ std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     VkExtent2D swapchainExtent_{};
     std::vector<VkImage> swapchainImages_;
     std::vector<VkImageView> swapchainImageViews_;
+    VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
+    // One depth image per swapchain image avoids sharing across frames in flight.
+    std::vector<GpuTexture> depthImages_;
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;

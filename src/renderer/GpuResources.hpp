@@ -15,6 +15,13 @@ struct GpuMesh {
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
 };
+// Color textures use sRGB; normal and ORM data must stay linear.
+enum class TextureSemantic {
+    Color,
+    Normal,
+    OcclusionRoughnessMetallic
+};
+
 struct GpuTexture {
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
