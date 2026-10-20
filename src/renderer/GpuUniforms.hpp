@@ -4,7 +4,6 @@
 
 struct FrameUniforms {
     std::array<float, 16> viewProjection{};
-    std::array<float, 16> model{};
 };
 struct GpuLight {
     std::array<float, 4> positionOrDirection{};
@@ -22,7 +21,7 @@ struct MaterialUniforms {
     std::array<float, 4> metallicRoughnessOcclusion{};
     std::array<float, 4> emissiveFactor{};
 };
-static_assert(sizeof(FrameUniforms) == 128);
+static_assert(sizeof(FrameUniforms) == 64);
 static_assert(sizeof(GpuLight) == 32);
 static_assert(sizeof(LightingUniforms) == 304);
 static_assert(sizeof(MaterialUniforms) == 48);

@@ -50,20 +50,41 @@ std::filesystem::path shaderDirectory() {
 
 } // namespace
 
-Renderer::Renderer(SDL_Window* window) : window_(window) {
+Renderer::Renderer(SDL_Window* window, const Scene& scene) : window_(window) {
     createInstance(); createSurface(); pickPhysicalDevice(); createDevice();
     createAllocator();
     createDescriptorSetLayouts();
     createUniformBuffers();
-    createDescriptorPool();
+    createDescriptorPool(scene.materials.size());
     createDescriptorSets();
     createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
+    for (const auto& material : scene.materials) {
+        MaterialUniforms uniforms{};
+        std::copy_n(glm::value_ptr(material.baseColor), 4, uniforms.baseColorFactor.begin());
+        uniforms.metallicRoughnessOcclusion = {material.metallic, material.roughness, 1, 0};
+        uniforms.emissiveFactor = {material.emissive.x, material.emissive.y, material.emissive.z, 0};
+        materials_.push_back(createMaterial(uniforms));
+    }
+    meshes_.resize(scene.primitives.size());
+    for (std::size_t i = 0; i < scene.primitives.size(); ++i) {
+        const auto& source = scene.primitives[i];
+        auto& mesh = meshes_[i];
+        mesh.vertexBuffer = createVertexBuffer(source.vertices.data(), source.vertices.size() * sizeof(Vertex));
+        mesh.indexBuffer = createIndexBuffer(source.indices.data(), source.indices.size() * sizeof(std::uint32_t));
+        mesh.vertexCount = static_cast<std::uint32_t>(source.vertices.size());
+        mesh.indexCount = static_cast<std::uint32_t>(source.indices.size());
+    }
 }
 
 Renderer::~Renderer() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
+        for (auto& mesh : meshes_) {
+            destroyBuffer(mesh.vertexBuffer);
+            destroyBuffer(mesh.indexBuffer);
+        }
+        for (auto& material : materials_) destroyBuffer(material.uniformBuffer);
         for (std::uint32_t i = 0; i < maxFramesInFlight; ++i) {
             vkDestroySemaphore(device_, renderFinished_[i], nullptr);
             vkDestroySemaphore(device_, imageAvailable_[i], nullptr);
@@ -335,6 +356,17 @@ void Renderer::copyBuffer(
         &copyRegion
     );
 
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = destination;
+    barrier.size = size;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
         vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
         throw std::runtime_error("Failed to end copy command buffer");
@@ -405,11 +437,6 @@ if (vmaFlushAllocation(
         "Failed to flush staging buffer memory"
     );
 }
-
-vmaUnmapMemory(
-    allocator_,
-    stagingBuffer.allocation
-);
 
 vmaUnmapMemory(
     allocator_,
@@ -641,17 +668,17 @@ void Renderer::createDescriptorSetLayouts() {
         );
     }
 }
-void Renderer::createDescriptorPool() {
+void Renderer::createDescriptorPool(std::size_t materialCount) {
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = 32;
+    poolSize.descriptorCount = static_cast<std::uint32_t>(materialCount) + maxFramesInFlight * 2;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType =
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
-    poolInfo.maxSets = 16;
+    poolInfo.maxSets = static_cast<std::uint32_t>(materialCount) + maxFramesInFlight;
 
     if (vkCreateDescriptorPool(
             device_,
@@ -1602,10 +1629,20 @@ void Renderer::createRenderPass() {
 
 void Renderer::createPipeline() {
     const auto directory = shaderDirectory();
-    const VkShaderModule vertex = shaderModule(device_, directory / "fullscreen.vert.spv");
-    const VkShaderModule fragment = shaderModule(device_, directory / "fullscreen.frag.spv");
+    const VkShaderModule vertex = shaderModule(device_, directory / "gltf_mesh.vert.spv");
+    const VkShaderModule fragment = shaderModule(device_, directory / "gltf_lit.frag.spv");
     const VkPipelineShaderStageCreateInfo stages[] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vertex, .pName = "main"}, {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragment, .pName = "main"}};
-    const VkPipelineVertexInputStateCreateInfo vertexInput{.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    const VkVertexInputBindingDescription binding{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
+    const std::array<VkVertexInputAttributeDescription, 3> attributes{{
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
+        {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
+        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)}
+    }};
+    const VkPipelineVertexInputStateCreateInfo vertexInput{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &binding,
+        .vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size()),
+        .pVertexAttributeDescriptions = attributes.data()};
     const VkPipelineInputAssemblyStateCreateInfo assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     const VkPipelineViewportStateCreateInfo viewport{.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
     const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
@@ -1620,16 +1657,16 @@ void Renderer::createPipeline() {
     const VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     const VkPipelineDynamicStateCreateInfo dynamic{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = states};
     const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts = {
-    frameDescriptorSetLayout_,
-    materialDescriptorSetLayout_
-};
-
-const VkPipelineLayoutCreateInfo layout{
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    .setLayoutCount =
-        static_cast<uint32_t>(descriptorSetLayouts.size()),
-    .pSetLayouts = descriptorSetLayouts.data()
-};
+        frameDescriptorSetLayout_, materialDescriptorSetLayout_
+    };
+    const VkPushConstantRange objectRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4)};
+    const VkPipelineLayoutCreateInfo layout{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = static_cast<std::uint32_t>(descriptorSetLayouts.size()),
+        .pSetLayouts = descriptorSetLayouts.data(),
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &objectRange
+    };
     check(vkCreatePipelineLayout(device_, &layout, nullptr, &pipelineLayout_), "Creating pipeline layout");
     const VkGraphicsPipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2, .pStages = stages, .pVertexInputState = &vertexInput, .pInputAssemblyState = &assembly, .pViewportState = &viewport, .pRasterizationState = &rasterizer, .pMultisampleState = &multisample, .pDepthStencilState = &depthStencil, .pColorBlendState = &blend, .pDynamicState = &dynamic, .layout = pipelineLayout_, .renderPass = renderPass_};
     const VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_);
@@ -1667,7 +1704,7 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex) {
+void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex, const Scene& scene, bool showGuides) {
     const VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     check(vkBeginCommandBuffer(buffer, &begin), "Beginning command buffer");
     std::array<VkClearValue, 2> clears{};
@@ -1679,12 +1716,33 @@ void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIn
     const VkRect2D scissor{{0, 0}, swapchainExtent_};
     vkCmdSetViewport(buffer, 0, 1, &viewport); vkCmdSetScissor(buffer, 0, 1, &scissor);
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-    vkCmdDraw(buffer, 3, 1, 0, 0);
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1,
+        &frameDescriptorSets_[currentFrame_], 0, nullptr);
+    for (const auto& node : scene.nodes) {
+        if (node.guide && !showGuides) continue;
+        // A zero scale has no invertible normal matrix; omit that instance.
+        const float determinant = glm::determinant(glm::mat3(node.world));
+        if (!std::isfinite(determinant) || determinant == 0.0f) continue;
+        vkCmdPushConstants(buffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), glm::value_ptr(node.world));
+        for (const auto index : node.primitives) {
+            const auto& mesh = meshes_.at(index);
+            const auto& material = materials_.at(scene.primitives.at(index).material);
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(buffer, 0, 1, &mesh.vertexBuffer.buffer, &offset);
+            vkCmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1, 1,
+                &material.descriptorSet, 0, nullptr);
+            vkCmdDrawIndexed(buffer, mesh.indexCount, 1, 0, 0, 0);
+        }
+    }
     vkCmdEndRenderPass(buffer);
     check(vkEndCommandBuffer(buffer), "Ending command buffer");
 }
 
-void Renderer::drawFrame() {
+void Renderer::drawFrame(const Scene& scene, const Camera& camera, bool showGuides) {
+    int drawableWidth = 0, drawableHeight = 0;
+    SDL_GetWindowSizeInPixels(window_, &drawableWidth, &drawableHeight);
+    if (drawableWidth <= 0 || drawableHeight <= 0) return;
     vkWaitForFences(device_, 1, &inFlight_[currentFrame_], VK_TRUE, UINT64_MAX);
     std::uint32_t imageIndex = 0;
     const VkResult acquire = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, imageAvailable_[currentFrame_], VK_NULL_HANDLE, &imageIndex);
@@ -1692,7 +1750,18 @@ void Renderer::drawFrame() {
     if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) check(acquire, "Acquiring swapchain image");
     check(vkResetFences(device_, 1, &inFlight_[currentFrame_]), "Resetting frame fence");
     check(vkResetCommandBuffer(commandBuffers_[currentFrame_], 0), "Resetting command buffer");
-    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex);
+    FrameUniforms frame{};
+    const auto viewProjection = camera.projection(static_cast<float>(swapchainExtent_.width) / swapchainExtent_.height) * camera.view();
+    std::copy_n(glm::value_ptr(viewProjection), 16, frame.viewProjection.begin());
+    updateUniformBuffer(frameUniformBuffers_[currentFrame_], &frame, sizeof(frame));
+    LightingUniforms lighting{};
+    lighting.cameraWorldPosition = {camera.position.x, camera.position.y, camera.position.z, 1};
+    lighting.ambientColor = {0.15f, 0.15f, 0.15f, 1};
+    lighting.lights[0].positionOrDirection = {-0.4f, -1.0f, -0.5f, 0};
+    lighting.lights[0].colorIntensity = {1, 1, 1, 2};
+    lighting.lightCount = {1, 0, 0, 0};
+    updateUniformBuffer(lightingUniformBuffers_[currentFrame_], &lighting, sizeof(lighting));
+    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex, scene, showGuides);
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     const VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .waitSemaphoreCount = 1, .pWaitSemaphores = &imageAvailable_[currentFrame_], .pWaitDstStageMask = &waitStage, .commandBufferCount = 1, .pCommandBuffers = &commandBuffers_[currentFrame_], .signalSemaphoreCount = 1, .pSignalSemaphores = &renderFinished_[currentFrame_]};
     check(vkQueueSubmit(graphicsQueue_, 1, &submit, inFlight_[currentFrame_]), "Submitting frame");

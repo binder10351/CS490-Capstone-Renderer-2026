@@ -5,19 +5,21 @@
 #include <vk_mem_alloc.h>
 #include "GpuResources.hpp"
 #include "GpuUniforms.hpp"
+#include "scene/Scene.hpp"
+#include "scene/Camera.hpp"
 #include <array>
 #include <cstdint>
 #include <vector>
 
 class Renderer {
 public:
-    explicit Renderer(SDL_Window* window);
+    Renderer(SDL_Window* window, const Scene& scene);
     ~Renderer();
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    void drawFrame();
+    void drawFrame(const Scene& scene, const Camera& camera, bool showGuides = true);
 
 private:
     static constexpr std::uint32_t maxFramesInFlight = 2;
@@ -71,7 +73,7 @@ GpuMaterial createMaterial(
 );
 void createDescriptorSetLayouts();
 
-void createDescriptorPool();
+void createDescriptorPool(std::size_t materialCount);
 void createDescriptorSets();
 GpuTexture createImage(
     uint32_t width,
@@ -128,10 +130,12 @@ void generateMipmaps(
     void createCommandBuffers();
     void createSyncObjects();
     void recreateSwapchain();
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Scene& scene, bool showGuides);
     [[nodiscard]] QueueFamilies findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool supportsSwapchain(VkPhysicalDevice device) const;
 
+    std::vector<GpuMesh> meshes_;
+    std::vector<GpuMaterial> materials_;
     SDL_Window* window_ = nullptr;
     VkInstance instance_ = VK_NULL_HANDLE;
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;

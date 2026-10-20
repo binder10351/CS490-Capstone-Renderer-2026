@@ -1,8 +1,8 @@
 #pragma once
-
+#include "Scene.hpp"
 #include <filesystem>
 
 class GltfLoader {
 public:
-    void load(const std::filesystem::path& filePath);
+    [[nodiscard]] Scene load(const std::filesystem::path& filePath);
 };

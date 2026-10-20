@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
 include(FetchContent)
@@ -25,6 +26,9 @@ add_executable(gltf_viewer
     src/app/Application.cpp
     src/renderer/Renderer.cpp
     src/scene/GltfLoader.cpp
+    src/scene/Scene.cpp
+    src/scene/Camera.cpp
+    src/app/OrbitCameraController.cpp
 )
 
 target_include_directories(gltf_viewer PRIVATE src)
@@ -34,6 +38,7 @@ target_link_libraries(gltf_viewer PRIVATE
     SDL3::SDL3
     GPUOpen::VulkanMemoryAllocator
     tinygltf
+    glm::glm
 )
 
 target_compile_features(gltf_viewer PRIVATE cxx_std_20)
@@ -71,3 +76,18 @@ add_custom_command(TARGET gltf_viewer POST_BUILD
             ${SHADER_OUTPUT_DIR}
             $<TARGET_FILE_DIR:gltf_viewer>/shaders
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(coordinate_tests
+        tests/Coordinates.cpp
+        src/scene/Scene.cpp
+        src/scene/Camera.cpp
+        src/scene/GltfLoader.cpp
+        src/app/OrbitCameraController.cpp
+    )
+    target_include_directories(coordinate_tests PRIVATE src)
+    target_link_libraries(coordinate_tests PRIVATE glm::glm tinygltf SDL3::SDL3)
+    target_compile_definitions(coordinate_tests PRIVATE TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets")
+    add_test(NAME coordinates COMMAND coordinate_tests)
+endif()

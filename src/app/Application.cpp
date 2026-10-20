@@ -1,11 +1,15 @@
 #include "Application.hpp"
 #include "renderer/Renderer.hpp"
+#include "scene/GltfLoader.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 
 #include <stdexcept>
 
-Application::Application() {
+Application::Application(const std::filesystem::path& modelPath) {
+    scene_ = modelPath.empty() ? Scene::cube() : GltfLoader{}.load(modelPath);
+    scene_.addGuides();
+    controller_.frame(scene_.worldBounds(), 1280.0f / 720.0f);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error(SDL_GetError());
     }
@@ -19,7 +23,14 @@ Application::Application() {
         throw std::runtime_error(error);
     }
 
-    renderer_ = std::make_unique<Renderer>(window_);
+    try {
+        renderer_ = std::make_unique<Renderer>(window_, scene_);
+    } catch (...) {
+        SDL_DestroyWindow(window_);
+        SDL_Quit();
+        throw;
+    }
+    SDL_SetWindowTitle(window_, "glTF Viewer | Drag: orbit | Shift-drag/Middle: pan | Wheel: dolly | F: frame | G: guides");
 }
 
 Application::~Application() {
@@ -35,12 +46,25 @@ int Application::run() {
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            int width = 0, height = 0;
+            SDL_GetWindowSizeInPixels(window_, &width, &height);
+            controller_.handleEvent(event, height);
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+                if (event.key.key == SDLK_F) controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
+                if (event.key.key == SDLK_G) showGuides_ = !showGuides_;
+            }
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
             }
         }
 
-        renderer_->drawFrame();
+        if (!running) break;
+        if (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) {
+            SDL_Delay(16);
+            continue;
+        }
+        scene_.updateWorldTransforms();
+        renderer_->drawFrame(scene_, controller_.camera, showGuides_);
     }
     return 0;
 }

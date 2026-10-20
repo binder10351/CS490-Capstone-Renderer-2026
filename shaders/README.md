@@ -15,7 +15,9 @@ Both fragment shaders require the same descriptor layout:
 
 For the mesh transform, set `viewProjection = projection * inverse(cameraToWorld)`
 once per frame, set `cameraWorldPosition` to the translation of `cameraToWorld`,
-and update `model` for each glTF node draw. Lights are world-space. Point lights
+and set the vertex-stage `ObjectUniforms.model` push constant (64 bytes) for each
+glTF node draw. `FrameUniforms` contains only `viewProjection` (64 bytes).
+Lights are world-space. Point lights
 use `positionOrDirection.w = 1`; directional lights use `w = 0` and a direction
 pointing from the light toward the scene.
 The shaders do not yet sample glTF textures, normal maps, image-based lighting,

@@ -8,6 +8,7 @@
       "features": ["vulkan"]
     },
     "vulkan-memory-allocator",
+    "glm",
     "vulkan-headers"
   ]
 }
