@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Low-cost forward shader: Lambert diffuse plus Blinn-Phong highlights.
 // It deliberately shares bindings with gltf_ggx.frag so materials can switch
@@ -18,6 +19,7 @@ struct Light {
 layout(location = 0) in vec3 inWorldPosition;
 layout(location = 1) in vec3 inWorldNormal;
 layout(location = 2) in vec2 inUv;
+layout(location = 3) in vec4 inWorldTangent;
 layout(location = 0) out vec4 outColor;
 
 layout(set = 0, binding = 1, std140) uniform LightingUniforms {
@@ -35,11 +37,14 @@ layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
     // x metallicFactor, y roughnessFactor, z occlusionStrength, w unused.
     vec4 metallicRoughnessOcclusion;
     vec4 emissiveFactor;
+    vec4 normalParameters;
 } material;
+
+#include "normal_mapping.glsl"
 
 void main() {
     // Positions and normals arrived from gltf_mesh.vert in world space.
-    const vec3 N = normalize(inWorldNormal);
+    const vec3 N = surfaceNormal();
     const vec3 V = normalize(lighting.cameraWorldPosition.xyz - inWorldPosition);
     const float roughness = clamp(material.metallicRoughnessOcclusion.y, 0.04, 1.0);
     // Lower roughness produces a tighter highlight. This is an artistic approximation.
@@ -71,7 +76,7 @@ void main() {
         color += radiance * NdotL * (material.baseColorFactor.rgb + F0 * specular);
     }
 
-    // Future additions: base-color/normal/metallic-roughness textures and
+    // Future additions: base-color/metallic-roughness textures and
     // per-light shadow-map visibility belong here, before light accumulation.
     color += material.emissiveFactor.rgb;
     outColor = vec4(color, material.baseColorFactor.a);

@@ -58,6 +58,7 @@ foreach(SHADER IN LISTS SHADERS)
         COMMAND ${Vulkan_GLSLC_EXECUTABLE} "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
                 -o "${SHADER_OUTPUT_DIR}/${SHADER}.spv"
         DEPENDS "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
+                "${CMAKE_SOURCE_DIR}/shaders/normal_mapping.glsl"
         VERBATIM
     )
     list(APPEND SPIRV_SHADERS "${SHADER_OUTPUT_DIR}/${SHADER}.spv")

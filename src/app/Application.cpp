@@ -5,6 +5,9 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
+#include <string>
 
 Application::Application(const std::filesystem::path& modelPath) {
     scene_ = modelPath.empty() ? Scene::cube() : GltfLoader{}.load(modelPath);
@@ -30,7 +33,33 @@ Application::Application(const std::filesystem::path& modelPath) {
         SDL_Quit();
         throw;
     }
-    SDL_SetWindowTitle(window_, "glTF Viewer | Drag: orbit | Shift-drag/Middle: pan | Wheel: dolly | F: frame | G: guides");
+    SDL_SetWindowTitle(window_, "glTF Viewer | Drop .gltf/.glb to open | Drag: orbit | Shift-drag/Middle: pan | Wheel: dolly | F: frame | G: guides");
+}
+
+void Application::loadModel(const std::filesystem::path& modelPath) {
+    Scene nextScene;
+    try {
+        auto extension = modelPath.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension != ".gltf" && extension != ".glb") {
+            throw std::runtime_error("Choose a .gltf or .glb model file.");
+        }
+        nextScene = GltfLoader{}.load(modelPath);
+        nextScene.addGuides();
+    } catch (const std::exception& error) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Could not load model", error.what(), window_);
+        return;
+    }
+
+    // Destroy the old swapchain before creating another for the same window.
+    // Invalid files are rejected above, leaving the current model intact.
+    renderer_.reset();
+    scene_ = std::move(nextScene);
+    renderer_ = std::make_unique<Renderer>(window_, scene_);
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(window_, &width, &height);
+    controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
 }
 
 Application::~Application() {
@@ -49,6 +78,10 @@ int Application::run() {
             int width = 0, height = 0;
             SDL_GetWindowSizeInPixels(window_, &width, &height);
             controller_.handleEvent(event, height);
+            if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+                const std::string utf8Path(event.drop.data);
+                loadModel(std::filesystem::path(std::u8string(utf8Path.begin(), utf8Path.end())));
+            }
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
                 if (event.key.key == SDLK_F) controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
                 if (event.key.key == SDLK_G) showGuides_ = !showGuides_;

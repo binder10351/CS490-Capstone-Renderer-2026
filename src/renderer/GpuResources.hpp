@@ -34,5 +34,6 @@ struct GpuTexture {
 };
 struct GpuMaterial {
     GpuBuffer uniformBuffer;
+    GpuTexture normalMap;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };

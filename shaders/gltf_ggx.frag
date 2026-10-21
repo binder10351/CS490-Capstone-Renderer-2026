@@ -1,8 +1,9 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Direct-light glTF metallic-roughness approximation using Cook-Torrance GGX.
 // This uses the exact same descriptors as gltf_lit.frag. It intentionally omits
-// image-based lighting and texture sampling until those resources are available.
+// image-based lighting and color/metallic-roughness texture sampling.
 // All calculations use world-space vectors and linear colors. The camera's
 // world-space position is supplied separately from the viewProjection matrix.
 
@@ -17,6 +18,7 @@ struct Light {
 layout(location = 0) in vec3 inWorldPosition;
 layout(location = 1) in vec3 inWorldNormal;
 layout(location = 2) in vec2 inUv;
+layout(location = 3) in vec4 inWorldTangent;
 layout(location = 0) out vec4 outColor;
 
 layout(set = 0, binding = 1, std140) uniform LightingUniforms {
@@ -31,7 +33,10 @@ layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
     vec4 baseColorFactor;
     vec4 metallicRoughnessOcclusion;
     vec4 emissiveFactor;
+    vec4 normalParameters;
 } material;
+
+#include "normal_mapping.glsl"
 
 float distributionGgx(float NdotH, float roughness) {
     const float a = roughness * roughness;
@@ -52,7 +57,7 @@ vec3 fresnelSchlick(float HdotV, vec3 F0) {
 
 void main() {
     // These varyings are world-space outputs of gltf_mesh.vert.
-    const vec3 N = normalize(inWorldNormal);
+    const vec3 N = surfaceNormal();
     const vec3 V = normalize(lighting.cameraWorldPosition.xyz - inWorldPosition);
     const float metallic = clamp(material.metallicRoughnessOcclusion.x, 0.0, 1.0);
     const float roughness = clamp(material.metallicRoughnessOcclusion.y, 0.04, 1.0);

@@ -69,7 +69,7 @@ void updateUniformBuffer(
 );
 void createUniformBuffers();
 GpuMaterial createMaterial(
-    const MaterialUniforms& material
+    const MaterialUniforms& material, const SceneNormalMap& normalMap
 );
 void createDescriptorSetLayouts();
 

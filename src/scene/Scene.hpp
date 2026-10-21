@@ -9,6 +9,7 @@ struct Vertex {
     glm::vec3 position{};
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
     glm::vec2 uv{};
+    glm::vec4 tangent{}; // xyz tangent, w handedness; zero means derive from UVs.
 };
 struct Bounds {
     glm::vec3 min{std::numeric_limits<float>::max()};
@@ -16,11 +17,18 @@ struct Bounds {
     [[nodiscard]] bool valid() const { return glm::all(glm::lessThanEqual(min, max)); }
     void include(glm::vec3 p) { min = glm::min(min, p); max = glm::max(max, p); }
 };
+struct SceneNormalMap {
+    std::uint32_t width = 0, height = 0;
+    std::vector<std::uint8_t> rgba;
+};
 struct SceneMaterial {
     glm::vec4 baseColor{0.8f, 0.8f, 0.8f, 1.0f};
     float metallic = 0.0f;
     float roughness = 0.6f;
     glm::vec3 emissive{0.0f};
+    SceneNormalMap normalMap;
+    float normalScale = 1.0f;
+    int normalTexCoord = 0;
 };
 struct MeshPrimitive {
     std::vector<Vertex> vertices;

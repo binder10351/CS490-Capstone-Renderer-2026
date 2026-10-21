@@ -49,6 +49,12 @@ Run `gltf_viewer` with no arguments for a cube, or pass a `.gltf` / `.glb` path:
 .\build\Debug\gltf_viewer.exe path\to\model.glb
 ```
 
+You can also drag a `.gltf` or `.glb` file onto the running viewer to replace the
+current model. The camera automatically frames the new model. Invalid or
+unsupported files show an error and leave the current model open. For `.gltf`
+files, keep any referenced `.bin` files and images in their original relative
+locations; `.glb` files typically bundle the model into one file.
+
 - Left drag: orbit around the current target.
 - Shift + left drag, or middle drag: pan.
 - Mouse wheel: dolly.
@@ -95,7 +101,13 @@ transforms and camera each frame. Geometry/material changes require a renderer
 rebuild; transform changes do not. Frame UBOs are updated after the corresponding
 frame fence, while model matrices are vertex-stage push constants per draw.
 
-Textures, alpha blending, animations, imported cameras/lights, selection gizmos,
+Normal maps are loaded from embedded or external glTF images, uploaded as linear
+RGBA8, and sampled by both lighting shaders with the authored normal scale and UV
+set. Export tangents for the closest match to baked maps; meshes without tangents
+use a derivative-based tangent frame. Normal maps currently use linear filtering
+and repeat wrapping; texture transforms are unsupported.
+
+Color/metallic-roughness textures, alpha blending, animations, imported cameras/lights, selection gizmos,
 and skinning/morphing are not implemented. Unsupported required extensions,
 non-triangle primitives, skins, and morph targets produce explicit load errors.
 

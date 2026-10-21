@@ -19,6 +19,8 @@ public:
     int run();
 
 private:
+    void loadModel(const std::filesystem::path& modelPath);
+
     Scene scene_;
     OrbitCameraController controller_;
     bool showGuides_ = true;

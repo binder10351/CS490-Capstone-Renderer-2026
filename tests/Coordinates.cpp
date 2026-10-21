@@ -65,6 +65,15 @@ int main() {
                 }
             }
         }
+        auto normalMapped = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map.gltf");
+        const auto& normalMaterial = normalMapped.materials.at(normalMapped.primitives.at(0).material);
+        require(normalMaterial.normalMap.width == 1 && normalMaterial.normalMap.height == 1, "Decode embedded normal image dimensions");
+        require(normalMaterial.normalMap.rgba == std::vector<std::uint8_t>({200,128,240,255}), "Normal pixels must remain linear RGBA8");
+        require(std::abs(normalMaterial.normalScale - 0.35f) < 1e-5f && normalMaterial.normalTexCoord == 1, "Import normal scale and UV selection");
+        require(normalMapped.primitives[0].vertices[1].uv == glm::vec2(1,0), "Use the normal texture's selected UV set");
+        require(normalMapped.primitives[0].vertices[0].tangent == glm::vec4(1,0,0,-1), "Preserve tangent handedness");
+        require(Scene::cube().materials[0].normalMap.rgba.empty(), "Untextured materials must retain mesh normals");
+        rejects([] { (void)GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map_missing_uv.gltf"); });
         OrbitCameraController controls;
         controls.frame(Scene::cube().worldBounds(), 1.0f);
         auto before = controls.camera.position;

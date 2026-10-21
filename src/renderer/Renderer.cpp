@@ -64,7 +64,8 @@ Renderer::Renderer(SDL_Window* window, const Scene& scene) : window_(window) {
         std::copy_n(glm::value_ptr(material.baseColor), 4, uniforms.baseColorFactor.begin());
         uniforms.metallicRoughnessOcclusion = {material.metallic, material.roughness, 1, 0};
         uniforms.emissiveFactor = {material.emissive.x, material.emissive.y, material.emissive.z, 0};
-        materials_.push_back(createMaterial(uniforms));
+        uniforms.normalParameters = {material.normalScale, material.normalMap.rgba.empty() ? 0.0f : 1.0f, 0, 0};
+        materials_.push_back(createMaterial(uniforms, material.normalMap));
     }
     meshes_.resize(scene.primitives.size());
     for (std::size_t i = 0; i < scene.primitives.size(); ++i) {
@@ -84,7 +85,10 @@ Renderer::~Renderer() {
             destroyBuffer(mesh.vertexBuffer);
             destroyBuffer(mesh.indexBuffer);
         }
-        for (auto& material : materials_) destroyBuffer(material.uniformBuffer);
+        for (auto& material : materials_) {
+            destroyImage(material.normalMap);
+            destroyBuffer(material.uniformBuffer);
+        }
         for (std::uint32_t i = 0; i < maxFramesInFlight; ++i) {
             vkDestroySemaphore(device_, renderFinished_[i], nullptr);
             vkDestroySemaphore(device_, imageAvailable_[i], nullptr);
@@ -542,7 +546,7 @@ void Renderer::createUniformBuffers() {
             createUniformBuffer(sizeof(LightingUniforms));
     }
 }GpuMaterial Renderer::createMaterial(
-    const MaterialUniforms& material
+    const MaterialUniforms& material, const SceneNormalMap& normalMap
 ) {
     GpuMaterial gpuMaterial{};
 
@@ -592,10 +596,29 @@ void Renderer::createUniformBuffers() {
     descriptorWrite.pBufferInfo =
         &bufferInfo;
 
+    const std::array<std::uint8_t, 4> flatNormal{128, 128, 255, 255};
+    try {
+        gpuMaterial.normalMap = normalMap.rgba.empty()
+            ? uploadTexture(flatNormal.data(), 1, 1, TextureSemantic::Normal)
+            : uploadTexture(normalMap.rgba.data(), normalMap.width, normalMap.height, TextureSemantic::Normal);
+    } catch (...) {
+        destroyBuffer(gpuMaterial.uniformBuffer);
+        throw;
+    }
+    const VkDescriptorImageInfo imageInfo{gpuMaterial.normalMap.sampler,
+        gpuMaterial.normalMap.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet imageWrite{};
+    imageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    imageWrite.dstSet = gpuMaterial.descriptorSet;
+    imageWrite.dstBinding = 1;
+    imageWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    imageWrite.descriptorCount = 1;
+    imageWrite.pImageInfo = &imageInfo;
+    const std::array<VkWriteDescriptorSet, 2> writes{descriptorWrite, imageWrite};
     vkUpdateDescriptorSets(
         device_,
-        1,
-        &descriptorWrite,
+        static_cast<std::uint32_t>(writes.size()),
+        writes.data(),
         0,
         nullptr
     );
@@ -647,8 +670,14 @@ void Renderer::createDescriptorSetLayouts() {
     VkDescriptorSetLayoutCreateInfo materialLayoutInfo{};
     materialLayoutInfo.sType =
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    materialLayoutInfo.bindingCount = 1;
-    materialLayoutInfo.pBindings = &materialBinding;
+    VkDescriptorSetLayoutBinding normalBinding{};
+    normalBinding.binding = 1;
+    normalBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normalBinding.descriptorCount = 1;
+    normalBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    const std::array<VkDescriptorSetLayoutBinding, 2> materialBindings{materialBinding, normalBinding};
+    materialLayoutInfo.bindingCount = static_cast<std::uint32_t>(materialBindings.size());
+    materialLayoutInfo.pBindings = materialBindings.data();
 
     if (vkCreateDescriptorSetLayout(
             device_,
@@ -672,12 +701,14 @@ void Renderer::createDescriptorPool(std::size_t materialCount) {
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = static_cast<std::uint32_t>(materialCount) + maxFramesInFlight * 2;
+    const std::array<VkDescriptorPoolSize, 2> poolSizes{{poolSize,
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(materialCount)}}};
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType =
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = static_cast<std::uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
     poolInfo.maxSets = static_cast<std::uint32_t>(materialCount) + maxFramesInFlight;
 
     if (vkCreateDescriptorPool(
@@ -1633,10 +1664,11 @@ void Renderer::createPipeline() {
     const VkShaderModule fragment = shaderModule(device_, directory / "gltf_lit.frag.spv");
     const VkPipelineShaderStageCreateInfo stages[] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vertex, .pName = "main"}, {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragment, .pName = "main"}};
     const VkVertexInputBindingDescription binding{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    const std::array<VkVertexInputAttributeDescription, 3> attributes{{
+    const std::array<VkVertexInputAttributeDescription, 4> attributes{{
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
         {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
-        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)}
+        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)},
+        {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)}
     }};
     const VkPipelineVertexInputStateCreateInfo vertexInput{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,

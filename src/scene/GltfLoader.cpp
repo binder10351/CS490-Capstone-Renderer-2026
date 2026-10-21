@@ -4,6 +4,8 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
 
 namespace {
 [[noreturn]] void invalid(const std::string& message) { throw std::runtime_error("glTF: " + message); }
@@ -77,7 +79,10 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
     tinygltf::TinyGLTF loader;
     tinygltf::Model model;
     std::string error, warning;
-    const bool binary = filePath.extension() == ".glb" || filePath.extension() == ".GLB";
+    auto extension = filePath.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const bool binary = extension == ".glb";
     const bool ok = binary ? loader.LoadBinaryFromFile(&model, &error, &warning, filePath.string()) :
         loader.LoadASCIIFromFile(&model, &error, &warning, filePath.string());
     if (!ok) invalid("could not load " + filePath.string() + ": " + error);
@@ -92,6 +97,30 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
         material.metallic = static_cast<float>(pbr.metallicFactor);
         material.roughness = static_cast<float>(pbr.roughnessFactor);
         material.emissive = glm::vec3(source.emissiveFactor[0], source.emissiveFactor[1], source.emissiveFactor[2]);
+        if (source.normalTexture.index >= 0) {
+            const auto index = static_cast<std::size_t>(source.normalTexture.index);
+            if (index >= model.textures.size()) invalid("invalid normal texture index");
+            const int imageIndex = model.textures[index].source;
+            if (imageIndex < 0 || static_cast<std::size_t>(imageIndex) >= model.images.size()) invalid("invalid normal image index");
+            const auto& image = model.images[imageIndex];
+            if (image.width <= 0 || image.height <= 0 || image.bits != 8 ||
+                image.pixel_type != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE || image.component < 3 || image.component > 4)
+                invalid("normal maps must decode to RGB/RGBA 8-bit images");
+            const auto pixels = static_cast<std::size_t>(image.width) * image.height;
+            if (pixels > std::numeric_limits<std::size_t>::max() / 4 || image.image.size() / image.component != pixels)
+                invalid("invalid normal image size");
+            material.normalMap.width = static_cast<std::uint32_t>(image.width);
+            material.normalMap.height = static_cast<std::uint32_t>(image.height);
+            material.normalMap.rgba.resize(pixels * 4);
+            for (std::size_t i = 0; i < pixels; ++i) {
+                for (int c = 0; c < 3; ++c) material.normalMap.rgba[i*4+c] = image.image[i*image.component+c];
+                material.normalMap.rgba[i*4+3] = 255;
+            }
+            material.normalScale = static_cast<float>(source.normalTexture.scale);
+            material.normalTexCoord = source.normalTexture.texCoord;
+            if (!std::isfinite(material.normalScale) || material.normalTexCoord < 0) invalid("invalid normal texture parameters");
+            if (!source.normalTexture.extensions.empty()) invalid("normal texture extensions are not supported");
+        }
         scene.materials.push_back(material);
     }
     std::vector<std::vector<std::size_t>> meshes(model.meshes.size());
@@ -117,11 +146,26 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
                 for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
                     mesh.vertices[i].normal = glm::vec3(values[i*3], values[i*3+1], values[i*3+2]);
             }
-            const auto uv = source.attributes.find("TEXCOORD_0");
+            if (source.material < -1 || source.material >= static_cast<int>(model.materials.size())) invalid("invalid material");
+            mesh.material = static_cast<std::size_t>(source.material + 1);
+            const auto& material = scene.materials[mesh.material];
+            const bool hasNormalMap = !material.normalMap.rgba.empty();
+            const auto uv = source.attributes.find("TEXCOORD_" + std::to_string(hasNormalMap ? material.normalTexCoord : 0));
+            if (hasNormalMap && uv == source.attributes.end()) invalid("normal map references missing texture coordinates");
             if (uv != source.attributes.end()) {
                 const auto values = accessorData(model, uv->second, TINYGLTF_TYPE_VEC2);
                 if (values.size() / 2 != mesh.vertices.size()) invalid("UV count differs from positions");
                 for (std::size_t i = 0; i < mesh.vertices.size(); ++i) mesh.vertices[i].uv = glm::vec2(values[i*2], values[i*2+1]);
+            }
+            const auto tangent = source.attributes.find("TANGENT");
+            if (tangent != source.attributes.end()) {
+                const auto values = accessorData(model, tangent->second, TINYGLTF_TYPE_VEC4);
+                if (values.size() / 4 != mesh.vertices.size()) invalid("tangent count differs from positions");
+                for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
+                    const glm::vec4 t(values[i*4], values[i*4+1], values[i*4+2], values[i*4+3]);
+                    if (glm::length(glm::vec3(t)) < 1e-8f || (t.w != 1.0f && t.w != -1.0f)) invalid("invalid tangent");
+                    mesh.vertices[i].tangent = t;
+                }
             }
             if (source.indices >= 0) {
                 if (static_cast<std::size_t>(source.indices) >= model.accessors.size()) invalid("invalid index accessor");

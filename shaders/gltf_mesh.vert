@@ -12,10 +12,12 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
+layout(location = 3) in vec4 inTangent;
 
 layout(location = 0) out vec3 outWorldPosition;
 layout(location = 1) out vec3 outWorldNormal;
 layout(location = 2) out vec2 outUv;
+layout(location = 3) out vec4 outWorldTangent;
 
 layout(set = 0, binding = 0, std140) uniform FrameUniforms {
     // projection * view. The view matrix is the inverse camera world transform.
@@ -35,5 +37,7 @@ void main() {
     // when the model matrix has non-uniform scale.
     outWorldNormal = mat3(transpose(inverse(object.model))) * inNormal;
     outUv = inUv;
+    outWorldTangent = vec4(mat3(object.model) * inTangent.xyz,
+                          inTangent.w * sign(determinant(mat3(object.model))));
     gl_Position = frame.viewProjection * worldPosition;
 }

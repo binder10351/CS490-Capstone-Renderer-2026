@@ -20,8 +20,9 @@ struct MaterialUniforms {
     std::array<float, 4> baseColorFactor{};
     std::array<float, 4> metallicRoughnessOcclusion{};
     std::array<float, 4> emissiveFactor{};
+    std::array<float, 4> normalParameters{}; // x scale, y map present
 };
 static_assert(sizeof(FrameUniforms) == 64);
 static_assert(sizeof(GpuLight) == 32);
 static_assert(sizeof(LightingUniforms) == 304);
-static_assert(sizeof(MaterialUniforms) == 48);
+static_assert(sizeof(MaterialUniforms) == 64);
