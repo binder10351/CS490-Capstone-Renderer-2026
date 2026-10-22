@@ -7,6 +7,7 @@ struct GpuBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkDeviceSize size = 0;
+    void* mappedData = nullptr; // VMA-owned persistent mapping for host-updated buffers.
 };
 struct GpuMesh {
     GpuBuffer vertexBuffer;
@@ -34,6 +35,6 @@ struct GpuTexture {
 };
 struct GpuMaterial {
     GpuBuffer uniformBuffer;
-    GpuTexture normalMap;
+    GpuTexture normalMap, baseColorMap, metallicRoughnessMap, occlusionMap;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };

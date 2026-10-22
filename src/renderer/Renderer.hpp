@@ -69,7 +69,7 @@ void updateUniformBuffer(
 );
 void createUniformBuffers();
 GpuMaterial createMaterial(
-    const MaterialUniforms& material, const SceneNormalMap& normalMap
+    const MaterialUniforms& material, const SceneMaterial& source
 );
 void createDescriptorSetLayouts();
 
@@ -102,7 +102,8 @@ GpuTexture uploadTexture(
     const void* pixelData,
     uint32_t width,
     uint32_t height,
-    TextureSemantic semantic = TextureSemantic::Color
+    TextureSemantic semantic = TextureSemantic::Color,
+    const SceneTexture& settings = SceneTexture{}
 );
 VkImageView createImageView(
     VkImage image,
@@ -110,7 +111,7 @@ VkImageView createImageView(
     uint32_t mipLevels
 );
 VkSampler createTextureSampler(
-    uint32_t mipLevels
+    uint32_t mipLevels, const SceneTexture& settings
 );
 void generateMipmaps(
     VkImage image,

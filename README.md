@@ -98,18 +98,33 @@ triangle geometry and the selected glTF scene hierarchy, including strided and
 sparse accessors, node matrices/TRS, shared meshes, material factors, and generated
 normals when absent. `Renderer` uploads that scene once and accepts its current
 transforms and camera each frame. Geometry/material changes require a renderer
-rebuild; transform changes do not. Frame UBOs are updated after the corresponding
-frame fence, while model matrices are vertex-stage push constants per draw.
+rebuild; transform changes do not. Frame UBOs stay persistently mapped and are reused after the corresponding
+frame fence, while model and normal matrices are vertex-stage push constants per node. The CPU
+computes the inverse-transpose normal matrix and mirrored orientation once per
+node per recorded frame, rather than per vertex.
 
-Normal maps are loaded from embedded or external glTF images, uploaded as linear
-RGBA8, and sampled by both lighting shaders with the authored normal scale and UV
-set. Export tangents for the closest match to baked maps; meshes without tangents
-use a derivative-based tangent frame. Normal maps currently use linear filtering
-and repeat wrapping; texture transforms are unsupported.
+The material path uses direct-light Cook-Torrance GGX shading. Base-color,
+metallic/roughness, ambient-occlusion, and normal textures load from external
+images, embedded data URIs, or GLB buffer views. Base-color images use sRGB GPU
+formats; normal, metallic/roughness, and AO images remain linear. Material factors
+multiply texture samples. Following the [glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html),
+roughness uses green, metallic uses blue, and AO uses red; AO strength affects
+ambient light only. AO may share an ORM image or use a separate image and UV set.
+Each texture independently selects its `TEXCOORD_n` attribute and honors glTF
+nearest/linear filtering, mip filtering, and repeat/clamp/mirrored wrapping.
+Missing textures use neutral fallback images. Decoded images currently require
+8-bit channels.
 
-Color/metallic-roughness textures, alpha blending, animations, imported cameras/lights, selection gizmos,
-and skinning/morphing are not implemented. Unsupported required extensions,
-non-triangle primitives, skins, and morph targets produce explicit load errors.
+Normal maps apply the authored scale and UV set. Export tangents for the closest
+match to baked maps; meshes without tangents use a derivative-based tangent frame.
+Texture-transform extensions are unsupported; optional extensions use the core
+material fallback, while unsupported required extensions produce load errors.
+
+Alpha masking/blending, emissive textures, vertex colors, image-based lighting,
+shadow maps, animations, imported cameras/lights, selection gizmos, and
+skinning/morphing are not implemented. Non-triangle primitives, skins, and morph
+targets produce explicit load errors. Node hierarchy, authored matrix/TRS
+transforms, and mesh instancing work for both `.gltf` and `.glb` files.
 
 ## Coordinate tests
 
@@ -122,4 +137,6 @@ ctest --test-dir build -C Debug --output-on-failure
 
 Tests cover parent/root composition, hierarchy cycles, camera inverse and depth
 mapping, shared mesh instances, mirrored transforms, world bounds, sparse
-accessors, invalid accessor ranges, and framing at multiple aspect ratios.
+accessors, invalid accessor ranges, and framing at multiple aspect ratios. Material
+tests cover glTF/GLB image decoding, PBR factors, sampler settings, independent UV
+selection, normal-map handedness, and rejection of missing texture coordinates.

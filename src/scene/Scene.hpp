@@ -8,7 +8,8 @@
 struct Vertex {
     glm::vec3 position{};
     glm::vec3 normal{0.0f, 1.0f, 0.0f};
-    glm::vec2 uv{};
+    glm::vec2 uv{}; // Normal-map UVs. Each material texture can select a different set.
+    glm::vec2 baseColorUv{}, metallicRoughnessUv{}, occlusionUv{};
     glm::vec4 tangent{}; // xyz tangent, w handedness; zero means derive from UVs.
 };
 struct Bounds {
@@ -17,16 +18,20 @@ struct Bounds {
     [[nodiscard]] bool valid() const { return glm::all(glm::lessThanEqual(min, max)); }
     void include(glm::vec3 p) { min = glm::min(min, p); max = glm::max(max, p); }
 };
-struct SceneNormalMap {
+struct SceneTexture {
     std::uint32_t width = 0, height = 0;
     std::vector<std::uint8_t> rgba;
+    int texCoord = 0;
+    int magFilter = 9729, minFilter = 9987;
+    int wrapS = 10497, wrapT = 10497;
 };
 struct SceneMaterial {
     glm::vec4 baseColor{0.8f, 0.8f, 0.8f, 1.0f};
     float metallic = 0.0f;
     float roughness = 0.6f;
     glm::vec3 emissive{0.0f};
-    SceneNormalMap normalMap;
+    SceneTexture normalMap, baseColorMap, metallicRoughnessMap, occlusionMap;
+    float occlusionStrength = 1.0f;
     float normalScale = 1.0f;
     int normalTexCoord = 0;
 };

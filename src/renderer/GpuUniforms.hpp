@@ -1,6 +1,16 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+
+// Push constants: mat4 followed by three padded normal-matrix columns.
+// normalColumns[0].w stores the world transform's orientation sign.
+struct ObjectUniforms {
+    std::array<float, 16> model{};
+    std::array<std::array<float, 4>, 3> normalColumns{};
+};
+static_assert(offsetof(ObjectUniforms, normalColumns) == 64);
+static_assert(sizeof(ObjectUniforms) == 112);
 
 struct FrameUniforms {
     std::array<float, 16> viewProjection{};

@@ -59,6 +59,8 @@ foreach(SHADER IN LISTS SHADERS)
                 -o "${SHADER_OUTPUT_DIR}/${SHADER}.spv"
         DEPENDS "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
                 "${CMAKE_SOURCE_DIR}/shaders/normal_mapping.glsl"
+                "${CMAKE_SOURCE_DIR}/shaders/material_textures.glsl"
+                "${CMAKE_SOURCE_DIR}/shaders/pbr_brdf.glsl"
         VERBATIM
     )
     list(APPEND SPIRV_SHADERS "${SHADER_OUTPUT_DIR}/${SHADER}.spv")
@@ -80,6 +82,8 @@ add_custom_command(TARGET gltf_viewer POST_BUILD
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(pbr_tests tests/Pbr.cpp)
+    add_test(NAME pbr COMMAND pbr_tests)
     add_executable(coordinate_tests
         tests/Coordinates.cpp
         src/scene/Scene.cpp

@@ -74,6 +74,32 @@ int main() {
         require(normalMapped.primitives[0].vertices[0].tangent == glm::vec4(1,0,0,-1), "Preserve tangent handedness");
         require(Scene::cube().materials[0].normalMap.rgba.empty(), "Untextured materials must retain mesh normals");
         rejects([] { (void)GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map_missing_uv.gltf"); });
+        for (const char* name : {"pbr_material.gltf", "pbr_material.glb"}) {
+            auto pbr = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / name);
+            const auto& primitive = pbr.primitives.at(0);
+            const auto& material = pbr.materials.at(primitive.material);
+            require(pbr.primitives.size() == 1 && pbr.nodes.size() == 3 &&
+                pbr.nodes[1].primitives == pbr.nodes[2].primitives, "Textured node instances share geometry");
+            require(close(glm::vec3(pbr.nodes[1].world[3]), {2,3,0}), "Textured nodes retain parent TRS");
+            require(pbr.materials[0].roughness == 1 && pbr.materials[0].metallic == 1 &&
+                pbr.materials[0].baseColor == glm::vec4(1), "glTF default material factors");
+            require(std::abs(material.metallic - 0.7f) < 1e-5f &&
+                std::abs(material.roughness - 0.2f) < 1e-5f &&
+                std::abs(material.occlusionStrength - 0.4f) < 1e-5f, "Import PBR factors and AO strength");
+            require(material.baseColor == glm::vec4(0.8f,0.6f,0.4f,1), "Base color factor stays linear");
+            for (const SceneTexture* map : {&material.baseColorMap, &material.metallicRoughnessMap,
+                    &material.occlusionMap, &material.normalMap}) {
+                require(map->width == 1 && map->height == 1 &&
+                    map->rgba == std::vector<std::uint8_t>({200,128,240,255}), "Decode all material images without altering channels");
+                require(map->magFilter == 9728 && map->minFilter == 9984 &&
+                    map->wrapS == 33071 && map->wrapT == 33648, "Preserve sampler filtering and wrapping");
+            }
+            require(primitive.vertices[1].baseColorUv == glm::vec2(0.75f,0.5f) &&
+                primitive.vertices[1].occlusionUv == glm::vec2(0.75f,0.5f) &&
+                primitive.vertices[1].metallicRoughnessUv == glm::vec2(1,0) &&
+                primitive.vertices[1].uv == glm::vec2(1,0), "Each texture uses its own UV set");
+        }
+        rejects([] { (void)GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "pbr_missing_uv.gltf"); });
         OrbitCameraController controls;
         controls.frame(Scene::cube().worldBounds(), 1.0f);
         auto before = controls.camera.position;
