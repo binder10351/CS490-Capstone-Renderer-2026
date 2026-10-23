@@ -67,12 +67,12 @@ int main() {
         }
         auto normalMapped = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map.gltf");
         const auto& normalMaterial = normalMapped.materials.at(normalMapped.primitives.at(0).material);
-        require(normalMaterial.normalMap.width == 1 && normalMaterial.normalMap.height == 1, "Decode embedded normal image dimensions");
-        require(normalMaterial.normalMap.rgba == std::vector<std::uint8_t>({200,128,240,255}), "Normal pixels must remain linear RGBA8");
-        require(std::abs(normalMaterial.normalScale - 0.35f) < 1e-5f && normalMaterial.normalTexCoord == 1, "Import normal scale and UV selection");
+        require(normalMapped.images.at(normalMapped.textures.at(normalMaterial.normalMap.texture).image).width == 1 && normalMapped.images.at(normalMapped.textures.at(normalMaterial.normalMap.texture).image).height == 1, "Decode embedded normal image dimensions");
+        require(normalMapped.images.at(normalMapped.textures.at(normalMaterial.normalMap.texture).image).rgba == std::vector<std::uint8_t>({200,128,240,255}), "Normal pixels must remain linear RGBA8");
+        require(std::abs(normalMaterial.normalScale - 0.35f) < 1e-5f && normalMaterial.normalMap.texCoord == 1, "Import normal scale and UV selection");
         require(normalMapped.primitives[0].vertices[1].uv == glm::vec2(1,0), "Use the normal texture's selected UV set");
-        require(normalMapped.primitives[0].vertices[0].tangent == glm::vec4(1,0,0,-1), "Preserve tangent handedness");
-        require(Scene::cube().materials[0].normalMap.rgba.empty(), "Untextured materials must retain mesh normals");
+        require(normalMapped.primitives[0].vertices[0].tangent == glm::vec4(0), "Ignore authored tangents when normals are missing");
+        require(!Scene::cube().materials[0].normalMap.present(), "Untextured materials must retain mesh normals");
         rejects([] { (void)GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map_missing_uv.gltf"); });
         for (const char* name : {"pbr_material.gltf", "pbr_material.glb"}) {
             auto pbr = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / name);
@@ -89,10 +89,13 @@ int main() {
             require(material.baseColor == glm::vec4(0.8f,0.6f,0.4f,1), "Base color factor stays linear");
             for (const SceneTexture* map : {&material.baseColorMap, &material.metallicRoughnessMap,
                     &material.occlusionMap, &material.normalMap}) {
-                require(map->width == 1 && map->height == 1 &&
-                    map->rgba == std::vector<std::uint8_t>({200,128,240,255}), "Decode all material images without altering channels");
-                require(map->magFilter == 9728 && map->minFilter == 9984 &&
-                    map->wrapS == 33071 && map->wrapT == 33648, "Preserve sampler filtering and wrapping");
+                const auto& texture = pbr.textures.at(map->texture);
+                const auto& image = pbr.images.at(texture.image);
+                const auto sampler = texture.sampler < 0 ? SceneSampler{} : pbr.samplers.at(texture.sampler);
+                require(image.width == 1 && image.height == 1 &&
+                    image.rgba == std::vector<std::uint8_t>({200,128,240,255}), "Decode all material images without altering channels");
+                require(sampler.magFilter == 9728 && sampler.minFilter == 9984 &&
+                    sampler.wrapS == 33071 && sampler.wrapT == 33648, "Preserve sampler filtering and wrapping");
             }
             require(primitive.vertices[1].baseColorUv == glm::vec2(0.75f,0.5f) &&
                 primitive.vertices[1].occlusionUv == glm::vec2(0.75f,0.5f) &&

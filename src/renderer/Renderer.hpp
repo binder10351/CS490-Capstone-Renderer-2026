@@ -5,6 +5,9 @@
 #include <vk_mem_alloc.h>
 #include "GpuResources.hpp"
 #include "GpuUniforms.hpp"
+#include "RenderSettings.hpp"
+
+struct ImDrawData;
 #include "scene/Scene.hpp"
 #include "scene/Camera.hpp"
 #include <array>
@@ -13,13 +16,17 @@
 
 class Renderer {
 public:
-    Renderer(SDL_Window* window, const Scene& scene);
+    Renderer(SDL_Window* window, const Scene& scene, bool enableUi = false);
     ~Renderer();
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    void drawFrame(const Scene& scene, const Camera& camera, bool showGuides = true);
+    // Synchronizes in-flight draws; texture/UV/geometry edits still require a rebuild.
+    void updateMaterialFactors(const Scene& scene);
+    void beginUiFrame();
+    void drawFrame(const Scene& scene, const Camera& camera, bool showGuides = true,
+        const RenderSettings& settings = RenderSettings{}, ImDrawData* uiDrawData = nullptr);
 
 private:
     static constexpr std::uint32_t maxFramesInFlight = 2;
@@ -29,6 +36,9 @@ private:
         [[nodiscard]] bool complete() const { return graphics != UINT32_MAX && present != UINT32_MAX; }
     };
 
+    void initializeUi();
+    bool uiEnabled_ = false;
+    bool uiInitialized_ = false;
     void createInstance();
     void createSurface();
     void pickPhysicalDevice();
@@ -69,7 +79,7 @@ void updateUniformBuffer(
 );
 void createUniformBuffers();
 GpuMaterial createMaterial(
-    const MaterialUniforms& material, const SceneMaterial& source
+    const MaterialUniforms& material, const SceneMaterial& source, const Scene& scene
 );
 void createDescriptorSetLayouts();
 
@@ -103,7 +113,8 @@ GpuTexture uploadTexture(
     uint32_t width,
     uint32_t height,
     TextureSemantic semantic = TextureSemantic::Color,
-    const SceneTexture& settings = SceneTexture{}
+    const SceneSampler& settings = SceneSampler{},
+    int bits = 8
 );
 VkImageView createImageView(
     VkImage image,
@@ -111,7 +122,7 @@ VkImageView createImageView(
     uint32_t mipLevels
 );
 VkSampler createTextureSampler(
-    uint32_t mipLevels, const SceneTexture& settings
+    uint32_t mipLevels, const SceneSampler& settings
 );
 void generateMipmaps(
     VkImage image,
@@ -131,7 +142,7 @@ void generateMipmaps(
     void createCommandBuffers();
     void createSyncObjects();
     void recreateSwapchain();
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Scene& scene, bool showGuides);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, ImDrawData* uiDrawData);
     [[nodiscard]] QueueFamilies findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool supportsSwapchain(VkPhysicalDevice device) const;
 
@@ -167,7 +178,8 @@ std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     std::vector<GpuTexture> depthImages_;
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline pipeline_ = VK_NULL_HANDLE;
+    // Bits: 0 mirrored, 1 double sided, 2 alpha blend.
+    std::array<VkPipeline, 8> pipelines_{};
     std::vector<VkFramebuffer> framebuffers_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers_{};

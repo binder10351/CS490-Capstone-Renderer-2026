@@ -5,8 +5,10 @@
 #include <memory>
 #include <filesystem>
 #include "OrbitCameraController.hpp"
+#include "renderer/RenderSettings.hpp"
 
 class Renderer;
+class ViewerUi;
 
 class Application {
 public:
@@ -23,6 +25,8 @@ private:
 
     Scene scene_;
     OrbitCameraController controller_;
+    RenderSettings settings_;
+    std::unique_ptr<ViewerUi> ui_;
     bool showGuides_ = true;
     SDL_Window* window_ = nullptr;
     std::unique_ptr<Renderer> renderer_;

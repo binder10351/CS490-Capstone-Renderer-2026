@@ -1,4 +1,5 @@
 #include "Application.hpp"
+#include "ViewerUi.hpp"
 #include "renderer/Renderer.hpp"
 #include "scene/GltfLoader.hpp"
 
@@ -9,8 +10,15 @@
 #include <cctype>
 #include <string>
 
+namespace {
+void reportWarnings(const Scene& scene) {
+    for (const auto& warning : scene.warnings) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s", warning.c_str());
+}
+}
+
 Application::Application(const std::filesystem::path& modelPath) {
     scene_ = modelPath.empty() ? Scene::cube() : GltfLoader{}.load(modelPath);
+    reportWarnings(scene_);
     scene_.addGuides();
     controller_.frame(scene_.worldBounds(), 1280.0f / 720.0f);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -27,8 +35,10 @@ Application::Application(const std::filesystem::path& modelPath) {
     }
 
     try {
-        renderer_ = std::make_unique<Renderer>(window_, scene_);
+        ui_ = std::make_unique<ViewerUi>(window_);
+        renderer_ = std::make_unique<Renderer>(window_, scene_, true);
     } catch (...) {
+        ui_.reset();
         SDL_DestroyWindow(window_);
         SDL_Quit();
         throw;
@@ -46,6 +56,7 @@ void Application::loadModel(const std::filesystem::path& modelPath) {
             throw std::runtime_error("Choose a .gltf or .glb model file.");
         }
         nextScene = GltfLoader{}.load(modelPath);
+        reportWarnings(nextScene);
         nextScene.addGuides();
     } catch (const std::exception& error) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Could not load model", error.what(), window_);
@@ -56,7 +67,7 @@ void Application::loadModel(const std::filesystem::path& modelPath) {
     // Invalid files are rejected above, leaving the current model intact.
     renderer_.reset();
     scene_ = std::move(nextScene);
-    renderer_ = std::make_unique<Renderer>(window_, scene_);
+    renderer_ = std::make_unique<Renderer>(window_, scene_, true);
     int width = 0, height = 0;
     SDL_GetWindowSizeInPixels(window_, &width, &height);
     controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
@@ -64,6 +75,7 @@ void Application::loadModel(const std::filesystem::path& modelPath) {
 
 Application::~Application() {
     renderer_.reset();
+    ui_.reset();
     if (window_ != nullptr) {
         SDL_DestroyWindow(window_);
     }
@@ -77,12 +89,14 @@ int Application::run() {
         while (SDL_PollEvent(&event)) {
             int width = 0, height = 0;
             SDL_GetWindowSizeInPixels(window_, &width, &height);
-            controller_.handleEvent(event, height);
+            ui_->processEvent(event);
+            const bool captured = ui_->captures(event);
+            if (!captured) controller_.handleEvent(event, height);
             if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
                 const std::string utf8Path(event.drop.data);
                 loadModel(std::filesystem::path(std::u8string(utf8Path.begin(), utf8Path.end())));
             }
-            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+            if (!captured && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
                 if (event.key.key == SDLK_F) controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
                 if (event.key.key == SDLK_G) showGuides_ = !showGuides_;
             }
@@ -96,8 +110,14 @@ int Application::run() {
             SDL_Delay(16);
             continue;
         }
+        renderer_->beginUiFrame();
+        if (ui_->build(settings_, showGuides_)) {
+            int width = 0, height = 0;
+            SDL_GetWindowSizeInPixels(window_, &width, &height);
+            controller_.frame(scene_.worldBounds(), height > 0 ? static_cast<float>(width) / height : 1.0f);
+        }
         scene_.updateWorldTransforms();
-        renderer_->drawFrame(scene_, controller_.camera, showGuides_);
+        renderer_->drawFrame(scene_, controller_.camera, showGuides_, settings_, ui_->drawData());
     }
     return 0;
 }

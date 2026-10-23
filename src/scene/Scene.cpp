@@ -3,6 +3,15 @@
 #include <stdexcept>
 
 void Scene::updateWorldTransforms() {
+    // Parent is authoritative when callers edit the hierarchy.
+    roots.clear();
+    for (auto& node : nodes) node.children.clear();
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const auto parent = nodes[i].parent;
+        if (parent < -1 || parent >= static_cast<int>(nodes.size())) throw std::runtime_error("Invalid scene parent");
+        if (parent < 0) roots.push_back(i);
+        else nodes[parent].children.push_back(i);
+    }
     std::vector<unsigned char> state(nodes.size(), 0);
     std::function<void(std::size_t)> visit = [&](std::size_t i) {
         if (state[i] == 2) return;
@@ -42,6 +51,9 @@ Bounds Scene::worldBounds() const {
 
 Scene Scene::cube() {
     Scene scene;
+    scene.materials[0].baseColor = {0.8f, 0.8f, 0.8f, 1.0f};
+    scene.materials[0].metallic = 0.0f;
+    scene.materials[0].roughness = 0.6f;
     MeshPrimitive mesh;
     const glm::vec3 normals[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (auto n : normals) {
@@ -59,6 +71,9 @@ Scene Scene::cube() {
     SceneNode node;
     node.name = "Cube";
     node.primitives = {0};
+    node.mesh = 0;
+    scene.meshes.push_back({"Cube", {0}});
+    scene.roots.push_back(0);
     scene.nodes.push_back(node);
     scene.updateWorldTransforms();
     return scene;
@@ -88,6 +103,7 @@ void Scene::addGuides() {
         node.local.translation = center;
         node.local.scale = scale;
         node.primitives = {mesh};
+        roots.push_back(nodes.size());
         nodes.push_back(std::move(node));
     };
     for (int i = -10; i <= 10; ++i) {

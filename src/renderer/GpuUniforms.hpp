@@ -25,14 +25,18 @@ struct LightingUniforms {
     std::array<float, 4> ambientColor{};
     std::array<GpuLight, 8> lights{};
     std::array<float, 4> lightCount{};
+    std::array<float, 4> textureOptions{}; // normal, base color, metallic/roughness, AO
+    std::array<float, 4> shadingOptions{}; // emissive, vertex colors, diffuse, specular
 };
 struct MaterialUniforms {
     std::array<float, 4> baseColorFactor{};
     std::array<float, 4> metallicRoughnessOcclusion{};
     std::array<float, 4> emissiveFactor{};
     std::array<float, 4> normalParameters{}; // x scale, y map present
+    std::array<float, 4> alphaParameters{}; // x mode (0 opaque, 1 mask, 2 blend), y cutoff, z double sided
 };
 static_assert(sizeof(FrameUniforms) == 64);
 static_assert(sizeof(GpuLight) == 32);
-static_assert(sizeof(LightingUniforms) == 304);
-static_assert(sizeof(MaterialUniforms) == 64);
+static_assert(sizeof(LightingUniforms) == 336);
+static_assert(offsetof(MaterialUniforms, alphaParameters) == 64);
+static_assert(sizeof(MaterialUniforms) == 80);

@@ -2,13 +2,24 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "cs490-capstone-renderer",
   "version-string": "0.1.0",
+  "builtin-baseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
   "dependencies": [
+    "glm",
+    {
+      "name": "imgui",
+      "features": [
+        "sdl3-binding",
+        "vulkan-binding"
+      ],
+      "version>=": "1.92.8"
+    },
     {
       "name": "sdl3",
-      "features": ["vulkan"]
+      "features": [
+        "vulkan"
+      ]
     },
-    "vulkan-memory-allocator",
-    "glm",
-    "vulkan-headers"
+    "vulkan",
+    "vulkan-memory-allocator"
   ]
 }

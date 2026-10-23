@@ -16,6 +16,7 @@ Both fragment shaders require the same descriptor layout:
 - set 1, binding 2: sRGB base-color map
 - set 1, binding 3: linear metallic/roughness map (B/G channels)
 - set 1, binding 4: linear occlusion map (R channel)
+- set 1, binding 5: emissive map (sRGB for 8-bit source images)
 
 For the mesh transform, set `viewProjection = projection * inverse(cameraToWorld)`
 once per frame, set `cameraWorldPosition` to the translation of `cameraToWorld`,
@@ -35,14 +36,26 @@ export tangents with the model for a matching basis. Degenerate UVs retain the m
 The fallback follows the Khronos sample renderer's `B = cross(N, T)` convention;
 authored tangents supply their own handedness, including mirrored UV islands.
 Materials without maps bind a flat fallback texture and skip normal sampling.
-Vertex locations 4, 5, and 6 carry independently selected base-color,
-metallic/roughness, and AO UVs; location 2 carries normal UVs. Textures preserve
+Vertex locations 4, 5, 6, and 7 carry independently selected base-color,
+metallic/roughness, AO, and emissive UVs; location 2 carries normal UVs. Location 8
+carries linear RGBA vertex color. Textures preserve
 sampler filtering and wrapping. Missing color/data textures bind white so scalar
 material factors remain effective. Base-color samples multiply the linear color
 factor, and metallic/roughness samples multiply their scalar factors. AO strength
 interpolates between unoccluded ambient and the sampled occlusion; direct light
-is unaffected. Image-based lighting, shadow maps, and alpha coverage are not yet
-implemented.
+is unaffected. Image-based lighting and shadow maps are not yet implemented.
+
+`MaterialUniforms` is 80 bytes: five `vec4`s containing base color,
+metallic/roughness/AO strength, emissive, normal scale/presence, and alpha
+mode/cutoff/double-sided settings. Both fragment paths multiply base color by
+`COLOR_0`, sample emissive RGB, discard MASK coverage, and force OPAQUE/MASK output
+alpha to one. The renderer selects depth-writing opaque or non-depth-writing
+straight-alpha blend pipelines and sorts transparent instances by camera depth.
+Culling and front-face winding are chosen per material and mirrored transform.
+Double-sided back faces negate the final world-space shading normal.
+
+Sixteen-bit source images are uploaded as linear RGBA half floats. Color samples
+are decoded from sRGB on the CPU before upload; data channels and alpha are linear.
 
 The GGX path uses a stable distribution peak and height-correlated Smith
 visibility, consistent with the
@@ -52,7 +65,15 @@ checks the analytical peak, normal-incidence visibility, reciprocity, and finite
 values at grazing angles. Avoid a fixed epsilon on the squared GGX distribution
 denominator: it suppresses smooth-surface highlights.
 
-Lighting currently consists of one directional light and diffuse ambient.
+`LightingUniforms` is 336 bytes. The final two `vec4`s carry viewer toggles:
+`textureOptions` selects normal/base-color/metallic-roughness/AO texture features;
+`shadingOptions` selects emissive/vertex-color/diffuse/specular features. Both
+fragment paths honor these flags. Disabling a material texture uses a neutral
+sample and retains its authored factor. Disabling emissive removes the entire
+emissive contribution. Alpha coverage and material culling remain active.
+
+Lighting currently consists of one directional light and diffuse ambient, with
+intensity, direction, color, and shading features controlled from the top menu.
 The background clear color is not a reflection environment. Smooth metals need
 specular image-based lighting (a roughness-prefiltered environment and BRDF
 integration) to show surroundings; correct material channels alone cannot

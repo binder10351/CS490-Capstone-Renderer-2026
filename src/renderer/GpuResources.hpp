@@ -35,6 +35,6 @@ struct GpuTexture {
 };
 struct GpuMaterial {
     GpuBuffer uniformBuffer;
-    GpuTexture normalMap, baseColorMap, metallicRoughnessMap, occlusionMap;
+    GpuTexture normalMap, baseColorMap, metallicRoughnessMap, occlusionMap, emissiveMap;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };

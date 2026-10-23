@@ -2,6 +2,9 @@
 #include "Renderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
+#include <glm/gtc/packing.hpp>
+#include <imgui.h>
+#include <imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -50,7 +53,28 @@ std::filesystem::path shaderDirectory() {
 
 } // namespace
 
-Renderer::Renderer(SDL_Window* window, const Scene& scene) : window_(window) {
+namespace {
+MaterialUniforms materialUniforms(const SceneMaterial& material) {
+    MaterialUniforms uniforms{};
+    std::copy_n(glm::value_ptr(material.baseColor), 4, uniforms.baseColorFactor.begin());
+    uniforms.metallicRoughnessOcclusion = {material.metallic, material.roughness, material.occlusionStrength, 0};
+    uniforms.emissiveFactor = {material.emissive.x, material.emissive.y, material.emissive.z, 0};
+    uniforms.normalParameters = {material.normalScale, material.normalMap.present() ? 1.0f : 0.0f, 0, 0};
+    uniforms.alphaParameters = {static_cast<float>(material.alphaMode), material.alphaCutoff, material.doubleSided ? 1.0f : 0.0f, 0};
+    return uniforms;
+}
+}
+
+void Renderer::updateMaterialFactors(const Scene& scene) {
+    if (scene.materials.size() != materials_.size()) throw std::runtime_error("Material count changed; rebuild the renderer");
+    check(vkDeviceWaitIdle(device_), "Waiting to update material factors");
+    for (std::size_t i = 0; i < materials_.size(); ++i) {
+        const auto uniforms = materialUniforms(scene.materials[i]);
+        updateUniformBuffer(materials_[i].uniformBuffer, &uniforms, sizeof(uniforms));
+    }
+}
+
+Renderer::Renderer(SDL_Window* window, const Scene& scene, bool enableUi) : uiEnabled_(enableUi), window_(window) {
     createInstance(); createSurface(); pickPhysicalDevice(); createDevice();
     createAllocator();
     createDescriptorSetLayouts();
@@ -59,13 +83,9 @@ Renderer::Renderer(SDL_Window* window, const Scene& scene) : window_(window) {
     createDescriptorSets();
     createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
+    if (uiEnabled_) initializeUi();
     for (const auto& material : scene.materials) {
-        MaterialUniforms uniforms{};
-        std::copy_n(glm::value_ptr(material.baseColor), 4, uniforms.baseColorFactor.begin());
-        uniforms.metallicRoughnessOcclusion = {material.metallic, material.roughness, material.occlusionStrength, 0};
-        uniforms.emissiveFactor = {material.emissive.x, material.emissive.y, material.emissive.z, 0};
-        uniforms.normalParameters = {material.normalScale, material.normalMap.rgba.empty() ? 0.0f : 1.0f, 0, 0};
-        materials_.push_back(createMaterial(uniforms, material));
+        materials_.push_back(createMaterial(materialUniforms(material), material, scene));
     }
     meshes_.resize(scene.primitives.size());
     for (std::size_t i = 0; i < scene.primitives.size(); ++i) {
@@ -81,6 +101,7 @@ Renderer::Renderer(SDL_Window* window, const Scene& scene) : window_(window) {
 Renderer::~Renderer() {
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
+        if (uiInitialized_) { ImGui_ImplVulkan_Shutdown(); uiInitialized_ = false; }
         for (auto& mesh : meshes_) {
             destroyBuffer(mesh.vertexBuffer);
             destroyBuffer(mesh.indexBuffer);
@@ -90,6 +111,7 @@ Renderer::~Renderer() {
             destroyImage(material.baseColorMap);
             destroyImage(material.metallicRoughnessMap);
             destroyImage(material.occlusionMap);
+            destroyImage(material.emissiveMap);
             destroyBuffer(material.uniformBuffer);
         }
         for (std::uint32_t i = 0; i < maxFramesInFlight; ++i) {
@@ -140,6 +162,27 @@ for (auto& buffer : lightingUniformBuffers_) {
     }
     if (surface_ != VK_NULL_HANDLE) vkDestroySurfaceKHR(instance_, surface_, nullptr);
     if (instance_ != VK_NULL_HANDLE) vkDestroyInstance(instance_, nullptr);
+}
+
+void Renderer::initializeUi() {
+    ImGui_ImplVulkan_InitInfo info{};
+    info.ApiVersion = VK_API_VERSION_1_0;
+    info.Instance = instance_;
+    info.PhysicalDevice = physicalDevice_;
+    info.Device = device_;
+    info.QueueFamily = queueFamilies_.graphics;
+    info.Queue = graphicsQueue_;
+    info.DescriptorPoolSize = 64;
+    info.MinImageCount = 2;
+    info.ImageCount = static_cast<std::uint32_t>(swapchainImages_.size());
+    info.PipelineInfoMain.RenderPass = renderPass_;
+    info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    info.CheckVkResultFn = [](VkResult result) { check(result, "UI Vulkan operation"); };
+    if (!ImGui_ImplVulkan_Init(&info)) throw std::runtime_error("Could not initialize the Vulkan UI backend");
+    uiInitialized_ = true;
+}
+void Renderer::beginUiFrame() {
+    if (uiInitialized_) ImGui_ImplVulkan_NewFrame();
 }
 
 void Renderer::createInstance() {
@@ -520,7 +563,7 @@ void Renderer::createUniformBuffers() {
 }
 
 GpuMaterial Renderer::createMaterial(
-    const MaterialUniforms& material, const SceneMaterial& source
+    const MaterialUniforms& material, const SceneMaterial& source, const Scene& scene
 ) {
     GpuMaterial gpuMaterial{};
 
@@ -571,22 +614,26 @@ GpuMaterial Renderer::createMaterial(
         &bufferInfo;
 
     const std::array<std::uint8_t, 4> flatNormal{128, 128, 255, 255}, white{255, 255, 255, 255};
-    const std::array<const SceneTexture*, 4> sources{&source.normalMap, &source.baseColorMap,
-        &source.metallicRoughnessMap, &source.occlusionMap};
-    const std::array<GpuTexture*, 4> textures{&gpuMaterial.normalMap, &gpuMaterial.baseColorMap,
-        &gpuMaterial.metallicRoughnessMap, &gpuMaterial.occlusionMap};
-    std::array<VkDescriptorImageInfo, 4> imageInfos{};
-    std::array<VkWriteDescriptorSet, 5> writes{};
+    const std::array<const SceneTexture*, 5> sources{&source.normalMap, &source.baseColorMap,
+        &source.metallicRoughnessMap, &source.occlusionMap, &source.emissiveMap};
+    const std::array<GpuTexture*, 5> textures{&gpuMaterial.normalMap, &gpuMaterial.baseColorMap,
+        &gpuMaterial.metallicRoughnessMap, &gpuMaterial.occlusionMap, &gpuMaterial.emissiveMap};
+    std::array<VkDescriptorImageInfo, 5> imageInfos{};
+    std::array<VkWriteDescriptorSet, 6> writes{};
     writes[0] = descriptorWrite;
     try {
         for (std::size_t i = 0; i < textures.size(); ++i) {
             const auto& image = *sources[i];
-            const auto semantic = i == 0 ? TextureSemantic::Normal : i == 1 ? TextureSemantic::Color :
+            const auto semantic = i == 0 ? TextureSemantic::Normal : (i == 1 || i == 4) ? TextureSemantic::Color :
                 TextureSemantic::OcclusionRoughnessMetallic;
             const auto& fallback = i == 0 ? flatNormal : white;
-            *textures[i] = image.rgba.empty()
-                ? uploadTexture(fallback.data(), 1, 1, semantic)
-                : uploadTexture(image.rgba.data(), image.width, image.height, semantic, image);
+            if (!image.present()) *textures[i] = uploadTexture(fallback.data(), 1, 1, semantic);
+            else {
+                const auto& resource = scene.textures.at(image.texture);
+                const auto& pixels = scene.images.at(resource.image);
+                const auto sampler = resource.sampler < 0 ? SceneSampler{} : scene.samplers.at(resource.sampler);
+                *textures[i] = uploadTexture(pixels.rgba.data(), pixels.width, pixels.height, semantic, sampler, pixels.bits);
+            }
             imageInfos[i] = {textures[i]->sampler, textures[i]->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             auto& write = writes[i+1];
             write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -656,7 +703,7 @@ void Renderer::createDescriptorSetLayouts() {
     VkDescriptorSetLayoutCreateInfo materialLayoutInfo{};
     materialLayoutInfo.sType =
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    std::array<VkDescriptorSetLayoutBinding, 5> materialBindings{};
+    std::array<VkDescriptorSetLayoutBinding, 6> materialBindings{};
     materialBindings[0] = materialBinding;
     for (std::uint32_t i = 1; i < materialBindings.size(); ++i) {
         materialBindings[i].binding = i;
@@ -690,7 +737,7 @@ void Renderer::createDescriptorPool(std::size_t materialCount) {
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = static_cast<std::uint32_t>(materialCount) + maxFramesInFlight * 2;
     const std::array<VkDescriptorPoolSize, 2> poolSizes{{poolSize,
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(materialCount) * 4}}};
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(materialCount) * 5}}};
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType =
@@ -1107,7 +1154,8 @@ GpuTexture Renderer::uploadTexture(
     uint32_t width,
     uint32_t height,
     TextureSemantic semantic,
-    const SceneTexture& settings
+    const SceneSampler& settings,
+    int bits
 ) {
     VkFormat format;
     switch (semantic) {
@@ -1122,22 +1170,28 @@ GpuTexture Renderer::uploadTexture(
         throw std::runtime_error("Unknown texture semantic");
     }
 
-    if (pixelData == nullptr || width == 0 || height == 0) {
-    throw std::runtime_error(
-        "Cannot upload an empty texture"
-    );
-}const uint32_t mipLevels =
-    static_cast<uint32_t>(
-        std::floor(
-            std::log2(
-                std::max(width, height)
-            )
-        )
-    ) + 1;
-    const VkDeviceSize imageSize =
-        static_cast<VkDeviceSize>(width) *
-        static_cast<VkDeviceSize>(height) *
-        4;
+    if (pixelData == nullptr || width == 0 || height == 0 || (bits != 8 && bits != 16))
+        throw std::runtime_error("Cannot upload an empty or unsupported texture");
+    // Vulkan has no 16-bit sRGB format. Decode high-precision color images to
+    // linear half floats before upload; data images use the same linear format.
+    std::vector<std::uint16_t> halfPixels;
+    if (bits == 16) {
+        const auto count = static_cast<std::size_t>(width) * height * 4;
+        halfPixels.reserve(count);
+        const auto* bytes = static_cast<const std::uint8_t*>(pixelData);
+        for (std::size_t i = 0; i < count; ++i) {
+            std::uint16_t channel;
+            std::memcpy(&channel, bytes + i * 2, 2);
+            float value = channel / 65535.0f;
+            if (semantic == TextureSemantic::Color && i % 4 != 3)
+                value = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+            halfPixels.push_back(glm::packHalf1x16(value));
+        }
+        pixelData = halfPixels.data();
+        format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    }
+    const uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4 * (bits / 8);
 
     GpuBuffer stagingBuffer = createBuffer(
         imageSize,
@@ -1264,7 +1318,7 @@ VkImageView Renderer::createImageView(
     return imageView;
 }
 VkSampler Renderer::createTextureSampler(
-    uint32_t mipLevels, const SceneTexture& settings
+    uint32_t mipLevels, const SceneSampler& settings
 ) {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1660,14 +1714,16 @@ void Renderer::createPipeline() {
     const VkShaderModule fragment = shaderModule(device_, directory / "gltf_ggx.frag.spv");
     const VkPipelineShaderStageCreateInfo stages[] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vertex, .pName = "main"}, {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragment, .pName = "main"}};
     const VkVertexInputBindingDescription binding{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    const std::array<VkVertexInputAttributeDescription, 7> attributes{{
+    const std::array<VkVertexInputAttributeDescription, 9> attributes{{
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
         {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)},
         {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)},
         {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)},
         {4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, baseColorUv)},
         {5, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, metallicRoughnessUv)},
-        {6, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, occlusionUv)}
+        {6, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, occlusionUv)},
+        {7, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, emissiveUv)},
+        {8, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, color)}
     }};
     const VkPipelineVertexInputStateCreateInfo vertexInput{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -1676,14 +1732,14 @@ void Renderer::createPipeline() {
         .pVertexAttributeDescriptions = attributes.data()};
     const VkPipelineInputAssemblyStateCreateInfo assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     const VkPipelineViewportStateCreateInfo viewport{.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
-    const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
+    VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
     const VkPipelineMultisampleStateCreateInfo multisample{.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_TRUE;
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    const VkPipelineColorBlendAttachmentState blendAttachment{.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+    VkPipelineColorBlendAttachmentState blendAttachment{.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
     const VkPipelineColorBlendStateCreateInfo blend{.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &blendAttachment};
     const VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     const VkPipelineDynamicStateCreateInfo dynamic{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = states};
@@ -1700,10 +1756,25 @@ void Renderer::createPipeline() {
     };
     check(vkCreatePipelineLayout(device_, &layout, nullptr, &pipelineLayout_), "Creating pipeline layout");
     const VkGraphicsPipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2, .pStages = stages, .pVertexInputState = &vertexInput, .pInputAssemblyState = &assembly, .pViewportState = &viewport, .pRasterizationState = &rasterizer, .pMultisampleState = &multisample, .pDepthStencilState = &depthStencil, .pColorBlendState = &blend, .pDynamicState = &dynamic, .layout = pipelineLayout_, .renderPass = renderPass_};
-    const VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_);
+    VkResult result = VK_SUCCESS;
+    for (std::size_t i = 0; i < pipelines_.size(); ++i) {
+        rasterizer.frontFace = i & 1 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizer.cullMode = i & 2 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+        const bool transparent = (i & 4) != 0;
+        depthStencil.depthWriteEnable = transparent ? VK_FALSE : VK_TRUE;
+        blendAttachment.blendEnable = transparent ? VK_TRUE : VK_FALSE;
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr, &pipelines_[i]);
+        if (result != VK_SUCCESS) break;
+    }
     vkDestroyShaderModule(device_, fragment, nullptr);
     vkDestroyShaderModule(device_, vertex, nullptr);
-    check(result, "Creating graphics pipeline");
+    check(result, "Creating graphics pipelines");
 }
 
 void Renderer::createFramebuffers() {
@@ -1735,7 +1806,7 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex, const Scene& scene, bool showGuides) {
+void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, ImDrawData* uiDrawData) {
     const VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     check(vkBeginCommandBuffer(buffer, &begin), "Beginning command buffer");
     std::array<VkClearValue, 2> clears{};
@@ -1746,38 +1817,60 @@ void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIn
     const VkViewport viewport{.width = static_cast<float>(swapchainExtent_.width), .height = static_cast<float>(swapchainExtent_.height), .minDepth = 0.0f, .maxDepth = 1.0f};
     const VkRect2D scissor{{0, 0}, swapchainExtent_};
     vkCmdSetViewport(buffer, 0, 1, &viewport); vkCmdSetScissor(buffer, 0, 1, &scissor);
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1,
         &frameDescriptorSets_[currentFrame_], 0, nullptr);
-    for (const auto& node : scene.nodes) {
+    struct Draw { std::size_t node, primitive; float depth; bool transparent; };
+    std::vector<Draw> draws;
+    std::vector<ObjectUniforms> objects(scene.nodes.size());
+    const auto view = camera.view();
+    for (std::size_t n = 0; n < scene.nodes.size(); ++n) {
+        const auto& node = scene.nodes[n];
         if (node.guide && !showGuides) continue;
-        // A zero scale has no invertible normal matrix; omit that instance.
         const float determinant = glm::determinant(glm::mat3(node.world));
         if (!std::isfinite(determinant) || determinant == 0.0f) continue;
-        // Compute once per node, shared by all its primitives and vertices.
         const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(node.world)));
-        ObjectUniforms object{};
+        auto& object = objects[n];
         std::copy_n(glm::value_ptr(node.world), 16, object.model.begin());
         for (std::size_t column = 0; column < 3; ++column)
             std::copy_n(glm::value_ptr(normalMatrix[column]), 3, object.normalColumns[column].begin());
         object.normalColumns[0][3] = determinant < 0.0f ? -1.0f : 1.0f;
-        vkCmdPushConstants(buffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(object), &object);
-        for (const auto index : node.primitives) {
-            const auto& mesh = meshes_.at(index);
-            const auto& material = materials_.at(scene.primitives.at(index).material);
-            const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(buffer, 0, 1, &mesh.vertexBuffer.buffer, &offset);
-            vkCmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1, 1,
-                &material.descriptorSet, 0, nullptr);
-            vkCmdDrawIndexed(buffer, mesh.indexCount, 1, 0, 0, 0);
+        for (auto index : node.primitives) {
+            const auto& primitive = scene.primitives.at(index);
+            const auto& material = scene.materials.at(primitive.material);
+            const auto center = (primitive.bounds.min + primitive.bounds.max) * 0.5f;
+            const float depth = -(view * node.world * glm::vec4(center, 1)).z;
+            draws.push_back({n, index, depth, material.alphaMode == AlphaMode::Blend});
         }
     }
+    // Opaque/masked draws populate depth first; blended instances are sorted in
+    // camera space. Intersecting transparent triangles still need OIT or splitting.
+    std::stable_sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) {
+        if (a.transparent != b.transparent) return !a.transparent;
+        return a.transparent && a.depth > b.depth;
+    });
+    for (const auto& draw : draws) {
+        const auto& object = objects[draw.node];
+        vkCmdPushConstants(buffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(object), &object);
+        const auto& primitive = scene.primitives.at(draw.primitive);
+        const auto& source = scene.materials.at(primitive.material);
+        const std::size_t pipeline = (object.normalColumns[0][3] < 0 ? 1 : 0) | (source.doubleSided ? 2 : 0) | (draw.transparent ? 4 : 0);
+        vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_[pipeline]);
+        const auto& mesh = meshes_.at(draw.primitive);
+        const auto& material = materials_.at(primitive.material);
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(buffer, 0, 1, &mesh.vertexBuffer.buffer, &offset);
+        vkCmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1, 1,
+            &material.descriptorSet, 0, nullptr);
+        vkCmdDrawIndexed(buffer, mesh.indexCount, 1, 0, 0, 0);
+    }
+    if (uiInitialized_ && uiDrawData) ImGui_ImplVulkan_RenderDrawData(uiDrawData, buffer);
     vkCmdEndRenderPass(buffer);
     check(vkEndCommandBuffer(buffer), "Ending command buffer");
 }
 
-void Renderer::drawFrame(const Scene& scene, const Camera& camera, bool showGuides) {
+void Renderer::drawFrame(const Scene& scene, const Camera& camera, bool showGuides,
+    const RenderSettings& settings, ImDrawData* uiDrawData) {
     int drawableWidth = 0, drawableHeight = 0;
     SDL_GetWindowSizeInPixels(window_, &drawableWidth, &drawableHeight);
     if (drawableWidth <= 0 || drawableHeight <= 0) return;
@@ -1796,12 +1889,16 @@ void Renderer::drawFrame(const Scene& scene, const Camera& camera, bool showGuid
     updateUniformBuffer(frameUniformBuffers_[currentFrame_], &frame, sizeof(frame));
     LightingUniforms lighting{};
     lighting.cameraWorldPosition = {camera.position.x, camera.position.y, camera.position.z, 1};
-    lighting.ambientColor = {0.15f, 0.15f, 0.15f, 1};
-    lighting.lights[0].positionOrDirection = {-0.4f, -1.0f, -0.5f, 0};
-    lighting.lights[0].colorIntensity = {1, 1, 1, 2};
-    lighting.lightCount = {1, 0, 0, 0};
+    lighting.ambientColor = {settings.ambientIntensity, settings.ambientIntensity, settings.ambientIntensity, 1};
+    lighting.lights[0].positionOrDirection = {settings.worldLightDirection.x, settings.worldLightDirection.y, settings.worldLightDirection.z, 0};
+    lighting.lights[0].colorIntensity = {settings.worldLightColor.x, settings.worldLightColor.y, settings.worldLightColor.z, settings.worldLightIntensity};
+    lighting.lightCount = {settings.worldLightEnabled && glm::length(settings.worldLightDirection) > 1e-6f ? 1.0f : 0.0f, 0, 0, 0};
+    lighting.textureOptions = {settings.normalMapping ? 1.0f : 0.0f, settings.baseColorTextures ? 1.0f : 0.0f,
+        settings.metallicRoughnessTextures ? 1.0f : 0.0f, settings.occlusion ? 1.0f : 0.0f};
+    lighting.shadingOptions = {settings.emissive ? 1.0f : 0.0f, settings.vertexColors ? 1.0f : 0.0f,
+        settings.diffuse ? 1.0f : 0.0f, settings.specular ? 1.0f : 0.0f};
     updateUniformBuffer(lightingUniformBuffers_[currentFrame_], &lighting, sizeof(lighting));
-    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex, scene, showGuides);
+    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex, scene, camera, showGuides, uiDrawData);
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     const VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .waitSemaphoreCount = 1, .pWaitSemaphores = &imageAvailable_[currentFrame_], .pWaitDstStageMask = &waitStage, .commandBufferCount = 1, .pCommandBuffers = &commandBuffers_[currentFrame_], .signalSemaphoreCount = 1, .pSignalSemaphores = &renderFinished_[currentFrame_]};
     check(vkQueueSubmit(graphicsQueue_, 1, &submit, inFlight_[currentFrame_]), "Submitting frame");
@@ -1817,7 +1914,9 @@ void Renderer::recreateSwapchain() {
     SDL_GetWindowSizeInPixels(window_, &width, &height);
     if (width == 0 || height == 0) return;
     vkDeviceWaitIdle(device_);
+    if (uiInitialized_) { ImGui_ImplVulkan_Shutdown(); uiInitialized_ = false; }
     destroySwapchain(); createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers();
+    if (uiEnabled_) initializeUi();
 }
 
 void Renderer::destroySwapchain() {
@@ -1825,10 +1924,10 @@ void Renderer::destroySwapchain() {
     framebuffers_.clear();
     for (auto& depth : depthImages_) destroyImage(depth);
     depthImages_.clear();
-    if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(device_, pipeline_, nullptr);
+    for (auto pipeline : pipelines_) if (pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device_, pipeline, nullptr);
     if (pipelineLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
     if (renderPass_ != VK_NULL_HANDLE) vkDestroyRenderPass(device_, renderPass_, nullptr);
-    pipeline_ = VK_NULL_HANDLE; pipelineLayout_ = VK_NULL_HANDLE; renderPass_ = VK_NULL_HANDLE;
+    pipelines_.fill(VK_NULL_HANDLE); pipelineLayout_ = VK_NULL_HANDLE; renderPass_ = VK_NULL_HANDLE;
     for (const auto view : swapchainImageViews_) vkDestroyImageView(device_, view, nullptr);
     swapchainImageViews_.clear();
     if (swapchain_ != VK_NULL_HANDLE) vkDestroySwapchainKHR(device_, swapchain_, nullptr);

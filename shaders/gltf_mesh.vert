@@ -16,6 +16,8 @@ layout(location = 3) in vec4 inTangent;
 layout(location = 4) in vec2 inBaseColorUv;
 layout(location = 5) in vec2 inMetallicRoughnessUv;
 layout(location = 6) in vec2 inOcclusionUv;
+layout(location = 7) in vec2 inEmissiveUv;
+layout(location = 8) in vec4 inColor;
 
 layout(location = 0) out vec3 outWorldPosition;
 layout(location = 1) out vec3 outWorldNormal;
@@ -24,6 +26,8 @@ layout(location = 3) out vec4 outWorldTangent;
 layout(location = 4) out vec2 outBaseColorUv;
 layout(location = 5) out vec2 outMetallicRoughnessUv;
 layout(location = 6) out vec2 outOcclusionUv;
+layout(location = 7) out vec2 outEmissiveUv;
+layout(location = 8) out vec4 outColor;
 
 layout(set = 0, binding = 0, std140) uniform FrameUniforms {
     // projection * view. The view matrix is the inverse camera world transform.
@@ -50,6 +54,8 @@ void main() {
     outBaseColorUv = inBaseColorUv;
     outMetallicRoughnessUv = inMetallicRoughnessUv;
     outOcclusionUv = inOcclusionUv;
+    outEmissiveUv = inEmissiveUv;
+    outColor = inColor;
     outWorldTangent = vec4(mat3(object.model) * inTangent.xyz,
                           inTangent.w * object.normalColumn0.w);
     gl_Position = frame.viewProjection * worldPosition;

@@ -22,6 +22,8 @@ layout(location = 3) in vec4 inWorldTangent;
 layout(location = 4) in vec2 inBaseColorUv;
 layout(location = 5) in vec2 inMetallicRoughnessUv;
 layout(location = 6) in vec2 inOcclusionUv;
+layout(location = 7) in vec2 inEmissiveUv;
+layout(location = 8) in vec4 inColor;
 layout(location = 0) out vec4 outColor;
 
 layout(set = 0, binding = 1, std140) uniform LightingUniforms {
@@ -30,6 +32,8 @@ layout(set = 0, binding = 1, std140) uniform LightingUniforms {
     vec4 ambientColor;
     Light lights[MAX_LIGHTS];
     vec4 lightCount;
+    vec4 textureOptions;
+    vec4 shadingOptions;
 } lighting;
 
 layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
@@ -37,6 +41,7 @@ layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
     vec4 metallicRoughnessOcclusion;
     vec4 emissiveFactor;
     vec4 normalParameters;
+    vec4 alphaParameters;
 } material;
 
 #include "normal_mapping.glsl"
@@ -50,16 +55,20 @@ vec3 fresnelSchlick(float HdotV, vec3 F0) {
 
 void main() {
     // These varyings are world-space outputs of gltf_mesh.vert.
-    const vec4 baseColor = material.baseColorFactor * texture(baseColorMap, inBaseColorUv);
-    const vec2 mr = texture(metallicRoughnessMap, inMetallicRoughnessUv).bg;
+    vec4 baseColor = material.baseColorFactor *
+        (lighting.textureOptions.y > 0.5 ? texture(baseColorMap, inBaseColorUv) : vec4(1.0)) *
+        (lighting.shadingOptions.y > 0.5 ? inColor : vec4(1.0));
+    if (material.alphaParameters.x == 1.0 && baseColor.a < material.alphaParameters.y) discard;
+    if (material.alphaParameters.x != 2.0) baseColor.a = 1.0;
+    const vec2 mr = lighting.textureOptions.z > 0.5 ? texture(metallicRoughnessMap, inMetallicRoughnessUv).bg : vec2(1.0);
     const float metallic = clamp(material.metallicRoughnessOcclusion.x * mr.x, 0.0, 1.0);
     const float ao = mix(1.0, texture(occlusionMap, inOcclusionUv).r,
-                         material.metallicRoughnessOcclusion.z);
+                         material.metallicRoughnessOcclusion.z * lighting.textureOptions.w);
     const vec3 N = surfaceNormal();
     const vec3 V = normalize(lighting.cameraWorldPosition.xyz - inWorldPosition);
     const float roughness = clamp(material.metallicRoughnessOcclusion.y * mr.y, 0.04, 1.0);
     const vec3 F0 = mix(vec3(0.04), baseColor.rgb, metallic);
-    vec3 color = lighting.ambientColor.rgb * baseColor.rgb * (1.0 - metallic) * ao;
+    vec3 color = lighting.ambientColor.rgb * baseColor.rgb * (1.0 - metallic) * ao * lighting.shadingOptions.z;
 
     const uint count = min(uint(lighting.lightCount.x), MAX_LIGHTS);
     for (uint i = 0u; i < count; ++i) {
@@ -89,9 +98,9 @@ void main() {
                              baseColor.rgb / PI;
         const vec3 radiance = light.colorIntensity.rgb * light.colorIntensity.w * attenuation;
         // Multiply by a shadow visibility value here once shadow maps exist.
-        color += (diffuse + specular) * radiance * NdotL;
+        color += (diffuse * lighting.shadingOptions.z + specular * lighting.shadingOptions.w) * radiance * NdotL;
     }
 
-    color += material.emissiveFactor.rgb;
+    color += material.emissiveFactor.rgb * texture(emissiveMap, inEmissiveUv).rgb * lighting.shadingOptions.x;
     outColor = vec4(color, baseColor.a);
 }

@@ -10,6 +10,7 @@ find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 include(FetchContent)
 set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
@@ -24,6 +25,7 @@ FetchContent_MakeAvailable(tinygltf)
 add_executable(gltf_viewer
     src/main.cpp
     src/app/Application.cpp
+    src/app/ViewerUi.cpp
     src/renderer/Renderer.cpp
     src/scene/GltfLoader.cpp
     src/scene/Scene.cpp
@@ -39,6 +41,7 @@ target_link_libraries(gltf_viewer PRIVATE
     GPUOpen::VulkanMemoryAllocator
     tinygltf
     glm::glm
+    imgui::imgui
 )
 
 target_compile_features(gltf_viewer PRIVATE cxx_std_20)
@@ -95,4 +98,27 @@ if(BUILD_TESTING)
     target_link_libraries(coordinate_tests PRIVATE glm::glm tinygltf SDL3::SDL3)
     target_compile_definitions(coordinate_tests PRIVATE TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets")
     add_test(NAME coordinates COMMAND coordinate_tests)
+    add_executable(material_tests tests/Materials.cpp src/scene/Scene.cpp src/scene/GltfLoader.cpp)
+    target_include_directories(material_tests PRIVATE src)
+    target_link_libraries(material_tests PRIVATE glm::glm tinygltf)
+    target_compile_definitions(material_tests PRIVATE TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets")
+    add_test(NAME materials COMMAND material_tests)
+endif()
+
+# Requires a Vulkan-capable display (or Xvfb and a software Vulkan driver).
+option(BUILD_RENDERER_TESTS "Build Vulkan material integration tests" OFF)
+if(BUILD_TESTING AND BUILD_RENDERER_TESTS)
+    add_executable(renderer_material_tests
+        tests/RendererMaterials.cpp src/renderer/Renderer.cpp src/app/ViewerUi.cpp
+        src/scene/Scene.cpp src/scene/Camera.cpp src/scene/GltfLoader.cpp)
+    target_include_directories(renderer_material_tests PRIVATE src)
+    target_link_libraries(renderer_material_tests PRIVATE
+        Vulkan::Vulkan SDL3::SDL3 GPUOpen::VulkanMemoryAllocator tinygltf glm::glm imgui::imgui)
+    target_compile_definitions(renderer_material_tests PRIVATE TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets")
+    add_dependencies(renderer_material_tests shaders)
+    add_custom_command(TARGET renderer_material_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${SHADER_OUTPUT_DIR} $<TARGET_FILE_DIR:renderer_material_tests>/shaders)
+    add_test(NAME renderer_materials COMMAND renderer_material_tests)
+    set_tests_properties(renderer_materials PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
