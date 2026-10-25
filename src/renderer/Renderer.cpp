@@ -81,7 +81,7 @@ Renderer::Renderer(SDL_Window* window, const Scene& scene, bool enableUi) : uiEn
     createUniformBuffers();
     createDescriptorPool(scene.materials.size());
     createDescriptorSets();
-    createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers();
+    createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers(); createPostProcess();
     createCommandPool(); createCommandBuffers(); createSyncObjects();
     if (uiEnabled_) initializeUi();
     for (const auto& material : scene.materials) {
@@ -175,7 +175,7 @@ void Renderer::initializeUi() {
     info.DescriptorPoolSize = 64;
     info.MinImageCount = 2;
     info.ImageCount = static_cast<std::uint32_t>(swapchainImages_.size());
-    info.PipelineInfoMain.RenderPass = renderPass_;
+    info.PipelineInfoMain.RenderPass = postRenderPass_;
     info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     info.CheckVkResultFn = [](VkResult result) { check(result, "UI Vulkan operation"); };
     if (!ImGui_ImplVulkan_Init(&info)) throw std::runtime_error("Could not initialize the Vulkan UI backend");
@@ -1684,7 +1684,7 @@ void Renderer::createDepthResources() {
 }
 
 void Renderer::createRenderPass() {
-    const VkAttachmentDescription color{.format = swapchainFormat_, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR};
+    const VkAttachmentDescription color{.format = hdrFormat_, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     const VkAttachmentReference reference{.attachment = 0, .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkAttachmentDescription depth{};
     depth.format = depthFormat_;
@@ -1704,7 +1704,13 @@ void Renderer::createRenderPass() {
         .srcStageMask = attachmentStages, .dstStageMask = attachmentStages,
         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT};
-    const VkRenderPassCreateInfo info{.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = static_cast<uint32_t>(attachments.size()), .pAttachments = attachments.data(), .subpassCount = 1, .pSubpasses = &subpass, .dependencyCount = 1, .pDependencies = &dependency};
+    const std::array<VkSubpassDependency, 2> dependencies{dependency,
+        VkSubpassDependency{.srcSubpass = 0, .dstSubpass = VK_SUBPASS_EXTERNAL,
+            .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT}};
+    const VkRenderPassCreateInfo info{.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = static_cast<uint32_t>(attachments.size()), .pAttachments = attachments.data(), .subpassCount = 1, .pSubpasses = &subpass, .dependencyCount = static_cast<uint32_t>(dependencies.size()), .pDependencies = dependencies.data()};
     check(vkCreateRenderPass(device_, &info, nullptr, &renderPass_), "Creating render pass");
 }
 
@@ -1778,12 +1784,103 @@ void Renderer::createPipeline() {
 }
 
 void Renderer::createFramebuffers() {
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice_, hdrFormat_, &properties);
+    const auto required = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    if ((properties.optimalTilingFeatures & required) != required)
+        throw std::runtime_error("GPU does not support filtered RGBA16F render targets");
+    hdrImages_.resize(swapchainImages_.size());
     framebuffers_.resize(swapchainImageViews_.size());
     for (std::size_t i = 0; i < framebuffers_.size(); ++i) {
-        const std::array<VkImageView, 2> attachments{swapchainImageViews_[i], depthImages_[i].imageView};
+        auto& hdr = hdrImages_[i];
+        hdr = createImage(swapchainExtent_.width, swapchainExtent_.height, 1, hdrFormat_,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        hdr.imageView = createImageView(hdr.image, hdrFormat_, 1);
+        const VkSamplerCreateInfo sampler{.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = VK_FILTER_LINEAR, .minFilter = VK_FILTER_LINEAR,
+            .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
+        check(vkCreateSampler(device_, &sampler, nullptr, &hdr.sampler), "Creating HDR sampler");
+        const std::array<VkImageView, 2> attachments{hdr.imageView, depthImages_[i].imageView};
         const VkFramebufferCreateInfo info{.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = renderPass_, .attachmentCount = static_cast<uint32_t>(attachments.size()), .pAttachments = attachments.data(), .width = swapchainExtent_.width, .height = swapchainExtent_.height, .layers = 1};
         check(vkCreateFramebuffer(device_, &info, nullptr, &framebuffers_[i]), "Creating framebuffer");
     }
+}
+
+void Renderer::createPostProcess() {
+    const VkAttachmentDescription color{.format = swapchainFormat_, .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR};
+    const VkAttachmentReference reference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    const VkSubpassDescription subpass{.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1, .pColorAttachments = &reference};
+    // Make the previous scene pass's HDR writes visible to texture sampling.
+    const VkSubpassDependency dependency{.srcSubpass = VK_SUBPASS_EXTERNAL, .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT};
+    const VkRenderPassCreateInfo pass{.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1, .pAttachments = &color, .subpassCount = 1, .pSubpasses = &subpass,
+        .dependencyCount = 1, .pDependencies = &dependency};
+    check(vkCreateRenderPass(device_, &pass, nullptr, &postRenderPass_), "Creating post-process render pass");
+    const VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+    const VkDescriptorSetLayoutCreateInfo setLayout{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1, .pBindings = &binding};
+    check(vkCreateDescriptorSetLayout(device_, &setLayout, nullptr, &postSetLayout_), "Creating post-process descriptor layout");
+    const auto count = static_cast<uint32_t>(hdrImages_.size());
+    const VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, count};
+    const VkDescriptorPoolCreateInfo pool{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = count, .poolSizeCount = 1, .pPoolSizes = &poolSize};
+    check(vkCreateDescriptorPool(device_, &pool, nullptr, &postDescriptorPool_), "Creating post-process descriptor pool");
+    const std::vector<VkDescriptorSetLayout> layouts(count, postSetLayout_);
+    postDescriptorSets_.resize(count);
+    const VkDescriptorSetAllocateInfo allocation{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = postDescriptorPool_, .descriptorSetCount = count, .pSetLayouts = layouts.data()};
+    check(vkAllocateDescriptorSets(device_, &allocation, postDescriptorSets_.data()), "Allocating post-process descriptors");
+    postFramebuffers_.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const VkDescriptorImageInfo image{hdrImages_[i].sampler, hdrImages_[i].imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = postDescriptorSets_[i], .dstBinding = 0, .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &image};
+        vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+        const VkFramebufferCreateInfo framebuffer{.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = postRenderPass_, .attachmentCount = 1, .pAttachments = &swapchainImageViews_[i],
+            .width = swapchainExtent_.width, .height = swapchainExtent_.height, .layers = 1};
+        check(vkCreateFramebuffer(device_, &framebuffer, nullptr, &postFramebuffers_[i]), "Creating post-process framebuffer");
+    }
+    const VkPushConstantRange options{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4 * sizeof(float)};
+    const VkPipelineLayoutCreateInfo layout{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1, .pSetLayouts = &postSetLayout_, .pushConstantRangeCount = 1, .pPushConstantRanges = &options};
+    check(vkCreatePipelineLayout(device_, &layout, nullptr, &postPipelineLayout_), "Creating post-process pipeline layout");
+    const auto directory = shaderDirectory();
+    const auto vertex = shaderModule(device_, directory / "fullscreen.vert.spv");
+    const auto fragment = shaderModule(device_, directory / "fullscreen.frag.spv");
+    const VkPipelineShaderStageCreateInfo stages[]{
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vertex, .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragment, .pName = "main"}};
+    const VkPipelineVertexInputStateCreateInfo input{.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    const VkPipelineInputAssemblyStateCreateInfo assembly{.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    const VkPipelineViewportStateCreateInfo viewport{.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
+    const VkPipelineRasterizationStateCreateInfo rasterizer{.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
+    const VkPipelineMultisampleStateCreateInfo multisample{.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+    const VkPipelineColorBlendAttachmentState attachment{.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+    const VkPipelineColorBlendStateCreateInfo blend{.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &attachment};
+    const VkDynamicState states[]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    const VkPipelineDynamicStateCreateInfo dynamic{.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = states};
+    const VkGraphicsPipelineCreateInfo pipeline{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2, .pStages = stages, .pVertexInputState = &input, .pInputAssemblyState = &assembly,
+        .pViewportState = &viewport, .pRasterizationState = &rasterizer, .pMultisampleState = &multisample,
+        .pColorBlendState = &blend, .pDynamicState = &dynamic, .layout = postPipelineLayout_, .renderPass = postRenderPass_};
+    const auto result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline, nullptr, &postPipeline_);
+    vkDestroyShaderModule(device_, fragment, nullptr);
+    vkDestroyShaderModule(device_, vertex, nullptr);
+    check(result, "Creating post-process pipeline");
 }
 
 void Renderer::createCommandPool() {
@@ -1806,7 +1903,7 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, ImDrawData* uiDrawData) {
+void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, const RenderSettings& settings, ImDrawData* uiDrawData) {
     const VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     check(vkBeginCommandBuffer(buffer, &begin), "Beginning command buffer");
     std::array<VkClearValue, 2> clears{};
@@ -1864,6 +1961,19 @@ void Renderer::recordCommandBuffer(VkCommandBuffer buffer, std::uint32_t imageIn
             &material.descriptorSet, 0, nullptr);
         vkCmdDrawIndexed(buffer, mesh.indexCount, 1, 0, 0, 0);
     }
+    vkCmdEndRenderPass(buffer);
+    const VkRenderPassBeginInfo postPass{.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = postRenderPass_, .framebuffer = postFramebuffers_[imageIndex],
+        .renderArea = {{0, 0}, swapchainExtent_}};
+    vkCmdBeginRenderPass(buffer, &postPass, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postPipeline_);
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postPipelineLayout_, 0, 1,
+        &postDescriptorSets_[imageIndex], 0, nullptr);
+    const std::array<float, 4> postOptions{settings.exposure, settings.toneMapping ? 1.0f : 0.0f,
+        settings.fxaa ? 1.0f : 0.0f,
+        swapchainFormat_ == VK_FORMAT_B8G8R8A8_SRGB || swapchainFormat_ == VK_FORMAT_R8G8B8A8_SRGB ? 0.0f : 1.0f};
+    vkCmdPushConstants(buffer, postPipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(postOptions), postOptions.data());
+    vkCmdDraw(buffer, 3, 1, 0, 0);
     if (uiInitialized_ && uiDrawData) ImGui_ImplVulkan_RenderDrawData(uiDrawData, buffer);
     vkCmdEndRenderPass(buffer);
     check(vkEndCommandBuffer(buffer), "Ending command buffer");
@@ -1898,7 +2008,7 @@ void Renderer::drawFrame(const Scene& scene, const Camera& camera, bool showGuid
     lighting.shadingOptions = {settings.emissive ? 1.0f : 0.0f, settings.vertexColors ? 1.0f : 0.0f,
         settings.diffuse ? 1.0f : 0.0f, settings.specular ? 1.0f : 0.0f};
     updateUniformBuffer(lightingUniformBuffers_[currentFrame_], &lighting, sizeof(lighting));
-    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex, scene, camera, showGuides, uiDrawData);
+    recordCommandBuffer(commandBuffers_[currentFrame_], imageIndex, scene, camera, showGuides, settings, uiDrawData);
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     const VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .waitSemaphoreCount = 1, .pWaitSemaphores = &imageAvailable_[currentFrame_], .pWaitDstStageMask = &waitStage, .commandBufferCount = 1, .pCommandBuffers = &commandBuffers_[currentFrame_], .signalSemaphoreCount = 1, .pSignalSemaphores = &renderFinished_[currentFrame_]};
     check(vkQueueSubmit(graphicsQueue_, 1, &submit, inFlight_[currentFrame_]), "Submitting frame");
@@ -1915,13 +2025,25 @@ void Renderer::recreateSwapchain() {
     if (width == 0 || height == 0) return;
     vkDeviceWaitIdle(device_);
     if (uiInitialized_) { ImGui_ImplVulkan_Shutdown(); uiInitialized_ = false; }
-    destroySwapchain(); createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers();
+    destroySwapchain(); createSwapchain(); createDepthResources(); createRenderPass(); createPipeline(); createFramebuffers(); createPostProcess();
     if (uiEnabled_) initializeUi();
 }
 
 void Renderer::destroySwapchain() {
+    for (auto framebuffer : postFramebuffers_) vkDestroyFramebuffer(device_, framebuffer, nullptr);
+    postFramebuffers_.clear();
+    if (postPipeline_) vkDestroyPipeline(device_, postPipeline_, nullptr);
+    if (postPipelineLayout_) vkDestroyPipelineLayout(device_, postPipelineLayout_, nullptr);
+    if (postDescriptorPool_) vkDestroyDescriptorPool(device_, postDescriptorPool_, nullptr);
+    if (postSetLayout_) vkDestroyDescriptorSetLayout(device_, postSetLayout_, nullptr);
+    if (postRenderPass_) vkDestroyRenderPass(device_, postRenderPass_, nullptr);
+    postPipeline_ = VK_NULL_HANDLE; postPipelineLayout_ = VK_NULL_HANDLE;
+    postDescriptorPool_ = VK_NULL_HANDLE; postSetLayout_ = VK_NULL_HANDLE; postRenderPass_ = VK_NULL_HANDLE;
+    postDescriptorSets_.clear();
     for (const auto framebuffer : framebuffers_) vkDestroyFramebuffer(device_, framebuffer, nullptr);
     framebuffers_.clear();
+    for (auto& hdr : hdrImages_) destroyImage(hdr);
+    hdrImages_.clear();
     for (auto& depth : depthImages_) destroyImage(depth);
     depthImages_.clear();
     for (auto pipeline : pipelines_) if (pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device_, pipeline, nullptr);

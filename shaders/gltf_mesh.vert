@@ -46,17 +46,25 @@ void main() {
     const vec4 worldPosition = object.model * vec4(inPosition, 1.0);
     // glTF node transforms are affine, so worldPosition.w is 1.0 here.
     outWorldPosition = worldPosition.xyz;
-    // CPU computes the inverse-transpose once per node, including nonuniform scale.
-    const mat3 normalMatrix = mat3(object.normalColumn0.xyz,
-                                  object.normalColumn1.xyz, object.normalColumn2.xyz);
+    // CPU computes the inverse-transpose once per node, including nonuniform
+    // scale.
+    const mat3 normalMatrix = mat3(
+        object.normalColumn0.xyz,
+        object.normalColumn1.xyz,
+        object.normalColumn2.xyz
+    );
+
     outWorldNormal = normalMatrix * inNormal;
+
     outUv = inUv;
     outBaseColorUv = inBaseColorUv;
     outMetallicRoughnessUv = inMetallicRoughnessUv;
     outOcclusionUv = inOcclusionUv;
     outEmissiveUv = inEmissiveUv;
     outColor = inColor;
+
     outWorldTangent = vec4(mat3(object.model) * inTangent.xyz,
                           inTangent.w * object.normalColumn0.w);
+
     gl_Position = frame.viewProjection * worldPosition;
 }

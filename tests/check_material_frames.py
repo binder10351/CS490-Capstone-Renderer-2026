@@ -4,6 +4,7 @@ Requires Python Pillow and ImageMagick's `import`. Example:
   python3 tests/check_material_frames.py build/renderer_material_tests /tmp/material-frames
 """
 from pathlib import Path
+import os
 import subprocess
 import sys
 import time
@@ -22,7 +23,8 @@ def expect(pixel, target, name, tolerance=4):
         raise AssertionError(f'{name}: expected {target}, got {pixel}')
 
 process = subprocess.Popen([str(executable), '--capture'], stdin=subprocess.PIPE,
-                           stdout=subprocess.PIPE, text=True)
+                           stdout=subprocess.PIPE, text=True,
+                           env={**os.environ, 'SDL_VIDEO_DRIVER': 'x11'})
 pixels = {}
 try:
     for line in process.stdout:
@@ -48,6 +50,14 @@ for name in ('opaque', 'mask_keep', 'double_back', 'mirrored_front'):
     expect(pixels[name], (255,0,0), name)
 for name in ('mask_discard', 'culled_back'):
     expect(pixels[name], srgb(background), name)
+# These uniform interior samples also verify exposure and the fitted tone curve.
+def tone(value):
+    return max(0, min(1, value * (2.51 * value + 0.03) / (value * (2.43 * value + 0.59) + 0.14)))
+
+expect(pixels['post_tone_mapping'], srgb((tone(1), 0, 0)), 'tone mapping')
+expect(pixels['post_exposure'], srgb((tone(0.25), 0, 0)), 'exposure')
+for name in ('post_tone_mapping_off', 'post_fxaa_off'):
+    expect(pixels[name], srgb((0.25, 0, 0)), name)
 blend = srgb((0.25+background[0]*0.75, background[1]*0.75, background[2]*0.75))
 expect(pixels['blend'], blend, 'blend')
 for i in range(8):

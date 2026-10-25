@@ -8,6 +8,9 @@ struct RenderSettings {
     glm::vec3 worldLightColor{1.0f};
     glm::vec3 worldLightDirection{-0.4f, -1.0f, -0.5f};
     float ambientIntensity = 0.15f;
+    float exposure = 0.0f; // Stops (EV), applied before tone mapping.
+    bool toneMapping = true;
+    bool fxaa = true;
     bool normalMapping = true;
     bool baseColorTextures = true;
     bool metallicRoughnessTextures = true;

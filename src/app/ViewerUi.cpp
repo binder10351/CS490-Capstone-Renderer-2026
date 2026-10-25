@@ -59,6 +59,12 @@ bool ViewerUi::build(RenderSettings& settings, bool& showGuides) {
             ImGui::MenuItem("Specular lighting", nullptr, &settings.specular);
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Post process")) {
+            ImGui::SliderFloat("Exposure (EV)", &settings.exposure, -8.0f, 8.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::MenuItem("Tone mapping", nullptr, &settings.toneMapping);
+            ImGui::MenuItem("FXAA", nullptr, &settings.fxaa);
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Grid and axes", "G", &showGuides);
             frame = ImGui::MenuItem("Frame model", "F");

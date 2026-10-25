@@ -138,11 +138,12 @@ void generateMipmaps(
     void createDepthResources();
     void createPipeline();
     void createFramebuffers();
+    void createPostProcess();
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
     void recreateSwapchain();
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, ImDrawData* uiDrawData);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, std::uint32_t imageIndex, const Scene& scene, const Camera& camera, bool showGuides, const RenderSettings& settings, ImDrawData* uiDrawData);
     [[nodiscard]] QueueFamilies findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool supportsSwapchain(VkPhysicalDevice device) const;
 
@@ -176,6 +177,15 @@ std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
     // One depth image per swapchain image avoids sharing across frames in flight.
     std::vector<GpuTexture> depthImages_;
+    static constexpr VkFormat hdrFormat_ = VK_FORMAT_R16G16B16A16_SFLOAT;
+    std::vector<GpuTexture> hdrImages_;
+    std::vector<VkFramebuffer> postFramebuffers_;
+    std::vector<VkDescriptorSet> postDescriptorSets_;
+    VkDescriptorPool postDescriptorPool_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout postSetLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout postPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline postPipeline_ = VK_NULL_HANDLE;
+    VkRenderPass postRenderPass_ = VK_NULL_HANDLE;
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     // Bits: 0 mirrored, 1 double sided, 2 alpha blend.

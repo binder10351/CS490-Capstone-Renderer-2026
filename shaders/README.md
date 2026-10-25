@@ -7,6 +7,19 @@ the renderer begins creating graphics pipelines.
 optional low-cost multi-light Lambert/Blinn-Phong path. `gltf_ggx.frag` is the
 active direct-light GGX path.
 
+The fragment entry points follow the same flow: sample the material, establish
+world-space shading vectors, accumulate ambient and direct light, then add emissive.
+Shared code lives in two includes:
+
+- `mesh_fragment.glsl`: GPU layouts, texture sampling, alpha coverage, normal
+  mapping, and light sampling, grouped into functions in one file
+- `pbr_brdf.glsl`: scalar GGX equations, kept separate because CPU tests compile
+  these same functions directly
+
+Each fragment entry point contains its own lighting-model function and a short
+`main()` that assembles the final color. Bindings and uniform member order remain
+shared between both lighting models.
+
 Both fragment shaders require the same descriptor layout:
 
 - set 0, binding 0: `FrameUniforms` (vertex stage)
@@ -77,5 +90,21 @@ intensity, direction, color, and shading features controlled from the top menu.
 The background clear color is not a reflection environment. Smooth metals need
 specular image-based lighting (a roughness-prefiltered environment and BRDF
 integration) to show surroundings; correct material channels alone cannot
-reproduce an environment-lit sample viewer. HDR exposure/tone mapping is also
-not implemented, so bright direct highlights can clip at the swapchain output.
+reproduce an environment-lit sample viewer.
+
+## Fullscreen post processing
+
+Scene shaders output linear HDR radiance to an `R16G16B16A16_SFLOAT` target
+(16-bit floating point per channel), with a separate target for each swapchain
+image. `fullscreen.vert` draws a fullscreen triangle and `fullscreen.frag`
+samples that target after the scene pass. It applies exposure in EV stops,
+an ACES fitted tone curve, and optional FXAA using tone-mapped luma for edge
+detection. FXAA smooths image edges but does not provide temporal stability or
+recover subpixel geometry like temporal AA or supersampling can.
+
+The **Post process** menu controls exposure, tone mapping, and FXAA. Tone mapping
+and FXAA default to enabled; disabling tone mapping clamps exposed radiance to
+the display range. The sRGB swapchain performs output encoding automatically;
+the shader encodes explicitly for a UNORM fallback. ImGui renders after the
+fullscreen pass. Add further image effects in `fullscreen.frag`; effects needing
+history or multiple passes will require additional targets and synchronization.

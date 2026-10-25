@@ -36,7 +36,14 @@ int main(int argc, char** argv) {
     if (!window) { std::cerr << SDL_GetError() << '\n'; SDL_Quit(); return 77; }
     try {
         Camera camera;
-        RenderSettings settings;
+        // Keep legacy pixel expectations linear/clamped; exercise the new effects separately.
+        const auto baselineSettings = [] {
+            RenderSettings result;
+            result.toneMapping = false;
+            result.fxaa = false;
+            return result;
+        };
+        RenderSettings settings = baselineSettings();
         auto frame = [&](const std::string& name, Renderer& renderer, Scene& scene, ViewerUi* ui = nullptr) {
             scene.updateWorldTransforms();
             renderer.updateMaterialFactors(scene);
@@ -60,6 +67,16 @@ int main(int argc, char** argv) {
             auto scene = plane();
             Renderer renderer(window, scene);
             frame("opaque", renderer, scene);
+            settings.toneMapping = true;
+            settings.fxaa = true;
+            frame("post_tone_mapping", renderer, scene);
+            settings.exposure = -2.0f;
+            frame("post_exposure", renderer, scene);
+            settings.toneMapping = false;
+            frame("post_tone_mapping_off", renderer, scene);
+            settings.fxaa = false;
+            frame("post_fxaa_off", renderer, scene);
+            settings = baselineSettings();
             scene.materials[0].alphaMode = AlphaMode::Mask;
             frame("mask_discard", renderer, scene);
             scene.materials[0].alphaCutoff = 0.2f;
@@ -125,7 +142,7 @@ int main(int argc, char** argv) {
             frame("emissive_srgb", renderer, scene);
             settings.emissive = false;
             frame("emissive_off", renderer, scene);
-            settings = RenderSettings{};
+            settings = baselineSettings();
         }
         {
             auto source = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "core_materials_16.gltf");
@@ -161,7 +178,7 @@ int main(int argc, char** argv) {
             settings.diffuse = false;
             settings.specular = false;
             frame("shading_off", renderer, scene);
-            settings = RenderSettings{};
+            settings = baselineSettings();
         }
         {
             auto scene = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "core_materials.glb");
