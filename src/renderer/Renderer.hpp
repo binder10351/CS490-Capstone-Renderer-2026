@@ -6,6 +6,7 @@
 #include "GpuResources.hpp"
 #include "GpuUniforms.hpp"
 #include "RenderSettings.hpp"
+#include "ShadowCascades.hpp"
 
 struct ImDrawData;
 #include "scene/Scene.hpp"
@@ -16,6 +17,8 @@ struct ImDrawData;
 
 class Renderer {
 public:
+    static void validateScene(const Scene& scene);
+
     Renderer(SDL_Window* window, const Scene& scene, bool enableUi = false);
     ~Renderer();
 
@@ -90,7 +93,8 @@ GpuTexture createImage(
     uint32_t height,
     uint32_t mipLevels,
     VkFormat format,
-    VkImageUsageFlags usage
+    VkImageUsageFlags usage,
+    uint32_t arrayLayers = 1
 );
 
 void destroyImage(GpuTexture& texture);
@@ -139,6 +143,23 @@ void generateMipmaps(
     void createPipeline();
     void createFramebuffers();
     void createPostProcess();
+    void createShadowResources();
+    void destroyShadowResources();
+    void updateShadows(const Scene& scene, const Camera& camera, const RenderSettings& settings);
+    void recordShadows(VkCommandBuffer buffer, const Scene& scene, const RenderSettings& settings);
+    struct ShadowFrame {
+        GpuTexture map;
+        std::array<VkImageView, shadowCascadeCount> layerViews{};
+        std::array<VkFramebuffer, shadowCascadeCount> framebuffers{};
+        GpuBuffer uniforms;
+        bool enabled = false;
+        bool initialized = false;
+    };
+    std::array<ShadowFrame, maxFramesInFlight> shadowFrames_{};
+    VkRenderPass shadowRenderPass_ = VK_NULL_HANDLE;
+    VkPipelineLayout shadowPipelineLayout_ = VK_NULL_HANDLE;
+    // Groups of four for list/strip/fan; mirrored and double-sided variants.
+    std::array<VkPipeline, 12> shadowPipelines_{};
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
@@ -179,17 +200,21 @@ std::array<VkDescriptorSet, maxFramesInFlight> frameDescriptorSets_{};
     std::vector<GpuTexture> depthImages_;
     static constexpr VkFormat hdrFormat_ = VK_FORMAT_R16G16B16A16_SFLOAT;
     std::vector<GpuTexture> hdrImages_;
+    std::vector<VkImageView> hdrAttachmentViews_;
     std::vector<VkFramebuffer> postFramebuffers_;
     std::vector<VkDescriptorSet> postDescriptorSets_;
     VkDescriptorPool postDescriptorPool_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout postSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout postPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline postPipeline_ = VK_NULL_HANDLE;
+    VkPipeline exposurePipeline_ = VK_NULL_HANDLE;
+    GpuBuffer exposureHistory_{};
+    uint64_t exposureTimestamp_ = 0;
     VkRenderPass postRenderPass_ = VK_NULL_HANDLE;
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    // Bits: 0 mirrored, 1 double sided, 2 alpha blend.
-    std::array<VkPipeline, 8> pipelines_{};
+    // Groups of 8 for list/strip/fan; bits 0 mirrored, 1 double sided, 2 alpha blend.
+    std::array<VkPipeline, 24> pipelines_{};
     std::vector<VkFramebuffer> framebuffers_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers_{};

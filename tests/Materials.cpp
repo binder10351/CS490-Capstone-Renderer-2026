@@ -1,4 +1,6 @@
 #include "scene/GltfLoader.hpp"
+#include "scene/GltfDocument.hpp"
+#include "renderer/PrepareMesh.hpp"
 #include "renderer/GpuUniforms.hpp"
 #include <json.hpp>
 #include <chrono>
@@ -59,7 +61,9 @@ int main() {
                     defaults.alphaMode == AlphaMode::Opaque && defaults.alphaCutoff == 0.5f && !defaults.doubleSided &&
                     !defaults.emissiveMap.present(), "Explicit and implicit materials use glTF defaults");
             }
-            const auto& flat = scene.primitives[0];
+            require(scene.primitives[0].vertices.size() == 4 && !scene.primitives[0].hasNormals,
+                "Loading must preserve authored vertices instead of splitting them for flat shading");
+            const auto flat = prepareMesh(scene.primitives[0]);
             require(flat.vertices.size() == 6 && flat.texCoords.size() == 3 && flat.colors.size() == 2,
                 "Retain all UV/color sets while splitting flat corners");
             require(flat.vertices[0].position == flat.vertices[3].position &&
@@ -76,6 +80,54 @@ int main() {
                 "Authored normals and tangent handedness remain indexed");
             require(authored.vertices[0].color == glm::vec4(1,0.5f,0.25f,1), "RGB colors get opaque alpha");
         }
+        const auto topologyScene = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "topologies.gltf");
+        const auto& document = *topologyScene.gltfDocument;
+        require(document.scenes.size() == 2 && document.nodes.size() == 2 && document.cameras.size() == 1 &&
+            document.skins.size() == 1 && document.animations.size() == 1 && !document.buffers[0].data.empty(), "Retain the full document beyond the selected scene");
+        require(document.extras.Get("documentTag").Get<std::string>() == "preserved" &&
+            document.nodes[0].extras.Get("nodeTag").Get<int>() == 42, "Retain source extras");
+        require(topologyScene.nodes[0].sourceNode == 0 && topologyScene.nodes[0].camera == 0,
+            "Runtime nodes link to authored nodes and camera references");
+        for (std::size_t i = 0; i < topologyScene.primitives.size(); ++i) {
+            const auto& source = topologyScene.primitives[i];
+            require(source.sourceMesh == 0 && source.sourcePrimitive == static_cast<int>(i), "Stable source primitive mapping");
+            const auto& authored = document.meshes[source.sourceMesh].primitives[source.sourcePrimitive];
+            require(authored.attributes.contains("_CUSTOM") && document.accessors[authored.attributes.at("_CUSTOM")].count == 4,
+                "Unknown attributes remain accessible through the source document");
+            require((authored.indices >= 0) == (i % 4 < 2), "Preserve indexed/non-indexed source distinction");
+            const auto expected = i < 4 ? PrimitiveTopology::TriangleStrip : PrimitiveTopology::TriangleFan;
+            require(source.topology == expected && source.vertices.size() == 4 &&
+                source.indices == std::vector<std::uint32_t>({0,1,2,3}), "Keep compact strip/fan geometry on the CPU");
+            const auto prepared = prepareMesh(source);
+            if (i % 2 == 0) {
+                require(prepared.topology == expected && prepared.indices == source.indices && prepared.vertices.size() == 4,
+                    "Authored-normal strips/fans stay native through GPU preparation");
+            } else {
+                require(prepared.topology == PrimitiveTopology::Triangles && prepared.vertices.size() == 6,
+                    "Missing normals produce a separate flat triangle-list upload");
+                for (const auto& vertex : prepared.vertices)
+                    require(vertex.normal == glm::vec3(0,0,1), "Strip parity and fan winding preserve flat normals");
+            }
+            require(source.vertices.size() == 4 && source.topology == expected, "GPU preparation must not mutate authored geometry");
+        }
+        Json authoredFeatures;
+        { std::ifstream input(std::filesystem::path(TEST_ASSET_DIR) / "topologies.gltf"); input >> authoredFeatures; }
+        authoredFeatures["meshes"][0]["primitives"][0]["targets"] = Json::array({
+            {{"POSITION", authoredFeatures["meshes"][0]["primitives"][0]["attributes"]["POSITION"]}}});
+        authoredFeatures["meshes"][0]["weights"] = {0.25};
+        authoredFeatures["nodes"][0]["weights"] = {0.75};
+        authoredFeatures["nodes"][0]["skin"] = 0;
+        const auto retained = TemporaryAsset{}.load(authoredFeatures);
+        require(retained.nodes[0].skin == 0 && retained.nodes[0].weights == std::vector<double>{0.75} &&
+            retained.gltfDocument->meshes[0].weights == std::vector<double>{0.25} &&
+            retained.gltfDocument->meshes[0].primitives[0].targets.size() == 1,
+            "Skins, node/mesh weights and morph targets must survive loading without rendering support");
+        auto degenerate = topologyScene.primitives[1];
+        degenerate.indices = {0,1,2,2,1,3};
+        const auto expanded = prepareMesh(degenerate);
+        require(expanded.vertices.size() == 12 && expanded.vertices[9].position == degenerate.vertices[1].position &&
+            expanded.vertices[10].position == degenerate.vertices[2].position,
+            "Degenerate strip triangles must still advance winding parity");
         const auto highPrecision = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "core_materials_16.gltf");
         require(highPrecision.images[0].bits == 16 && highPrecision.images[0].rgba.size() == 8, "Preserve 16-bit PNG precision on the CPU");
         std::uint16_t red;

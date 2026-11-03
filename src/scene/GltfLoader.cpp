@@ -192,12 +192,16 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
     std::vector<std::vector<std::size_t>> meshes(model.meshes.size());
     for (std::size_t m = 0; m < model.meshes.size(); ++m) {
         for (const auto& source : model.meshes[m].primitives) {
-            if (source.mode != -1 && source.mode != TINYGLTF_MODE_TRIANGLES) invalid("only triangle primitives are supported");
-            if (!source.targets.empty()) invalid("morph targets are not yet supported");
+            const int mode = source.mode == -1 ? TINYGLTF_MODE_TRIANGLES : source.mode;
+            if (mode < 0 || mode > 6) invalid("invalid primitive mode");
             const auto position = source.attributes.find("POSITION");
             if (position == source.attributes.end()) invalid("primitive has no POSITION");
             const auto positions = vertexData(model, position->second, TINYGLTF_TYPE_VEC3);
             MeshPrimitive mesh;
+            mesh.topology = static_cast<PrimitiveTopology>(mode);
+            mesh.sourceMesh = static_cast<int>(m);
+            mesh.sourcePrimitive = static_cast<int>(&source - model.meshes[m].primitives.data());
+            mesh.hasNormals = source.attributes.contains("NORMAL");
             mesh.vertices.resize(positions.size() / 3);
             if (mesh.vertices.empty() || mesh.vertices.size() > UINT32_MAX) invalid("invalid vertex count");
             for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
@@ -280,35 +284,11 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
             } else {
                 for (std::uint32_t i = 0; i < mesh.vertices.size(); ++i) mesh.indices.push_back(i);
             }
-            if (mesh.indices.empty() || mesh.indices.size() % 3 || mesh.indices.size() > UINT32_MAX) invalid("invalid triangle index count");
-            if (normal == source.attributes.end()) {
-                // glTF requires flat normals when NORMAL is absent. Split indexed
-                // corners, including all retained UV sets, so edges stay sharp.
-                std::vector<Vertex> corners;
-                std::map<int, std::vector<glm::vec2>> cornerUvs;
-                std::map<int, std::vector<glm::vec4>> cornerColors;
-                corners.reserve(mesh.indices.size());
-                for (std::size_t i = 0; i < mesh.indices.size(); i += 3) {
-                    const auto a = mesh.vertices[mesh.indices[i]].position;
-                    const auto b = mesh.vertices[mesh.indices[i+1]].position;
-                    const auto c = mesh.vertices[mesh.indices[i+2]].position;
-                    const auto n = glm::cross(b-a, c-a);
-                    for (std::size_t j = 0; j < 3; ++j) {
-                        const auto index = mesh.indices[i+j];
-                        auto v = mesh.vertices[index];
-                        v.normal = n;
-                        v.tangent = {}; // Authored tangents require authored normals.
-                        corners.push_back(v);
-                        for (const auto& [set, uv] : mesh.texCoords) cornerUvs[set].push_back(uv[index]);
-                        for (const auto& [set, colors] : mesh.colors) cornerColors[set].push_back(colors[index]);
-                    }
-                }
-                mesh.vertices = std::move(corners);
-                mesh.texCoords = std::move(cornerUvs);
-                mesh.colors = std::move(cornerColors);
-                for (std::size_t i = 0; i < mesh.indices.size(); ++i) mesh.indices[i] = static_cast<std::uint32_t>(i);
-            }
-            for (auto& v : mesh.vertices) v.normal = glm::length(v.normal) > 1e-8f ? glm::normalize(v.normal) : glm::vec3(0,1,0);
+            if (mesh.indices.empty() || mesh.indices.size() > UINT32_MAX) invalid("invalid index count");
+            const auto count = mesh.indices.size();
+            if ((mode == 4 && count % 3) || ((mode == 5 || mode == 6) && count < 3) ||
+                (mode == 1 && count % 2) || ((mode == 2 || mode == 3) && count < 2))
+                invalid("invalid primitive index count");
             meshes[m].push_back(scene.primitives.size());
             scene.primitives.push_back(std::move(mesh));
         }
@@ -323,12 +303,17 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
         if (index < 0 || static_cast<std::size_t>(index) >= model.nodes.size() || visited[index]) invalid("invalid or repeated node in hierarchy");
         visited[index] = true;
         const auto& source = model.nodes[index];
-        if (source.skin >= 0) invalid("skinning is not yet supported");
+        if (source.skin < -1 || source.skin >= static_cast<int>(model.skins.size())) invalid("invalid node skin");
+        if (source.camera < -1 || source.camera >= static_cast<int>(model.cameras.size())) invalid("invalid node camera");
         if ((!source.translation.empty() && source.translation.size() != 3) ||
             (!source.scale.empty() && source.scale.size() != 3) ||
             (!source.rotation.empty() && source.rotation.size() != 4)) invalid("invalid node TRS dimensions");
         SceneNode node;
         node.name = source.name;
+        node.sourceNode = index;
+        node.skin = source.skin;
+        node.camera = source.camera;
+        node.weights = source.weights;
         node.parent = parent;
         if (!source.matrix.empty()) {
             if (!source.translation.empty() || !source.rotation.empty() || !source.scale.empty())
@@ -364,5 +349,6 @@ Scene GltfLoader::load(const std::filesystem::path& filePath) {
     for (auto root : model.scenes[sceneIndex].nodes) visit(root, -1);
     scene.updateWorldTransforms();
     if (!scene.worldBounds().valid()) invalid("scene contains no renderable geometry");
+    scene.gltfDocument = std::make_shared<const tinygltf::Model>(std::move(model));
     return scene;
 }

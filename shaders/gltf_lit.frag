@@ -8,6 +8,7 @@
 // sRGB swapchain converts the final linear RGB output for display.
 
 #include "mesh_fragment.glsl"
+#include "shadow_sampling.glsl"
 
 vec3 evaluateBlinnPhong(
     SurfaceMaterial surface,
@@ -42,9 +43,10 @@ void main() {
     for (uint i = 0u; i < count; ++i) {
         const LightSample light = sampleLight(
             lighting.lights[i], inWorldPosition);
-        color += evaluateBlinnPhong(surface, normal, viewDirection, light);
+        float visibility = i == 0u ? worldLightVisibility() : 1.0;
+        color += visibility * evaluateBlinnPhong(surface, normal, viewDirection, light);
     }
 
     color += surface.emissive;
-    outColor = vec4(color, surface.baseColor.a);
+    outColor = vec4(showCascade(color), surface.baseColor.a);
 }

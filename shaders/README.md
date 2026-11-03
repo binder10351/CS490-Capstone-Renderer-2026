@@ -92,17 +92,54 @@ specular image-based lighting (a roughness-prefiltered environment and BRDF
 integration) to show surroundings; correct material channels alone cannot
 reproduce an environment-lit sample viewer.
 
+## Cascaded directional shadows
+
+`shadow.vert` and `shadow.frag` render three 2048×2048 depth layers before the
+scene pass. Frame set binding 2 holds the std140 `ShadowUniforms` block (three
+light matrices, camera view, split depths, controls); binding 3 is a nearest
+comparison `sampler2DArrayShadow`. Each frame in flight owns its array, layer
+views, framebuffers, and uniform buffer. Render-pass dependencies transition
+individual layers from depth writes to fragment sampling.
+
+`ShadowCascades.hpp` computes logarithmic/uniform splits, fixed sphere footprints,
+texel-snapped light-space centers, and a depth range including off-screen scene
+bounds. `Shadows.cpp` draws opaque and masked casters, including native strip/fan
+and mirrored/double-sided variants. The mask pass shares `material_uniforms.glsl`
+with the scene shaders and applies the same alpha factor/texture/vertex cutoff.
+Blended meshes and guides do not cast. No camera depth prepass is required.
+
+`shadow_sampling.glsl` selects a cascade by camera depth and performs one nearest
+comparison, with explicit zero gradients (only mip 0 exists). It shadows the
+world light's direct contribution in both GGX and Blinn–Phong; ambient/emissive
+are unaffected. Out-of-range receivers remain lit. There is no filtering,
+cascade blending, or contact hardening. The debug overlay colors the three
+cascade intervals. Shadow transforms use the same Vulkan [0,1] depth convention
+and one clip-space Y flip as the main pass.
+
 ## Fullscreen post processing
 
 Scene shaders output linear HDR radiance to an `R16G16B16A16_SFLOAT` target
 (16-bit floating point per channel), with a separate target for each swapchain
 image. `fullscreen.vert` draws a fullscreen triangle and `fullscreen.frag`
-samples that target after the scene pass. It applies exposure in EV stops,
-an ACES fitted tone curve, and optional FXAA using tone-mapped luma for edge
+samples that target after the scene pass. Linear blits build its mip chain down
+to 1×1 each frame. The final mip estimates average scene luminance for automatic
+exposure targeting 0.18, with a bounded multiplier (1/256 to 256). This arithmetic
+average is sensitive to bright pixels. A single-invocation compute pass adapts
+exposure in EV space using `1 - exp(-deltaSeconds / adaptationSeconds)` and
+stores history in a GPU buffer shared across swapchain images. The default
+1-second adaptation time closes about 63% of the exposure gap per second;
+the **Adaptation time (s)** slider controls the speed (larger is slower). The
+first automatic frame initializes immediately; re-enabling eases from manual
+exposure. History survives resize, and frame delta is capped at 0.1 seconds to
+avoid jumps after pauses. For odd
+image dimensions, filtered blits only approximate the average. The EV slider
+provides exposure compensation. The shader applies per-channel Reinhard tone
+mapping (`color / (1 + color)`) and optional FXAA using tone-mapped luma for edge
 detection. FXAA smooths image edges but does not provide temporal stability or
 recover subpixel geometry like temporal AA or supersampling can.
 
-The **Post process** menu controls exposure, tone mapping, and FXAA. Tone mapping
+The **Post process** menu controls auto exposure (enabled by default), EV compensation,
+tone mapping, and FXAA. Tone mapping
 and FXAA default to enabled; disabling tone mapping clamps exposed radiance to
 the display range. The sRGB swapchain performs output encoding automatically;
 the shader encodes explicitly for a UNORM fallback. ImGui renders after the

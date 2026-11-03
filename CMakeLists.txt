@@ -27,6 +27,7 @@ add_executable(gltf_viewer
     src/app/Application.cpp
     src/app/ViewerUi.cpp
     src/renderer/Renderer.cpp
+    src/renderer/Shadows.cpp
     src/scene/GltfLoader.cpp
     src/scene/Scene.cpp
     src/scene/Camera.cpp
@@ -50,6 +51,9 @@ set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 set(SHADERS
     fullscreen.vert
     fullscreen.frag
+    exposure.comp
+    shadow.vert
+    shadow.frag
     gltf_mesh.vert
     gltf_lit.frag
     gltf_ggx.frag
@@ -63,6 +67,9 @@ foreach(SHADER IN LISTS SHADERS)
         DEPENDS "${CMAKE_SOURCE_DIR}/shaders/${SHADER}"
                 "${CMAKE_SOURCE_DIR}/shaders/mesh_fragment.glsl"
                 "${CMAKE_SOURCE_DIR}/shaders/pbr_brdf.glsl"
+                "${CMAKE_SOURCE_DIR}/shaders/material_uniforms.glsl"
+                "${CMAKE_SOURCE_DIR}/shaders/shadow_uniforms.glsl"
+                "${CMAKE_SOURCE_DIR}/shaders/shadow_sampling.glsl"
         VERBATIM
     )
     list(APPEND SPIRV_SHADERS "${SHADER_OUTPUT_DIR}/${SHADER}.spv")
@@ -84,6 +91,10 @@ add_custom_command(TARGET gltf_viewer POST_BUILD
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(shadow_tests tests/Shadows.cpp src/scene/Scene.cpp src/scene/Camera.cpp)
+    target_include_directories(shadow_tests PRIVATE src)
+    target_link_libraries(shadow_tests PRIVATE glm::glm)
+    add_test(NAME shadows COMMAND shadow_tests)
     add_executable(pbr_tests tests/Pbr.cpp)
     add_test(NAME pbr COMMAND pbr_tests)
     add_executable(coordinate_tests
@@ -108,7 +119,7 @@ endif()
 option(BUILD_RENDERER_TESTS "Build Vulkan material integration tests" OFF)
 if(BUILD_TESTING AND BUILD_RENDERER_TESTS)
     add_executable(renderer_material_tests
-        tests/RendererMaterials.cpp src/renderer/Renderer.cpp src/app/ViewerUi.cpp
+        tests/RendererMaterials.cpp src/renderer/Renderer.cpp src/renderer/Shadows.cpp src/app/ViewerUi.cpp
         src/scene/Scene.cpp src/scene/Camera.cpp src/scene/GltfLoader.cpp)
     target_include_directories(renderer_material_tests PRIVATE src)
     target_link_libraries(renderer_material_tests PRIVATE

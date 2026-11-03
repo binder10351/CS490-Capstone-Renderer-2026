@@ -118,11 +118,13 @@ mirrored transforms. Double-sided back faces reverse their shading normals.
 Nodes with a singular world transform are omitted because their normal matrix
 cannot be inverted.
 
-`Application` owns the CPU scene and orbit controller. `GltfLoader` parses static
-triangle geometry and the selected glTF scene hierarchy, including strided and
-sparse accessors, node matrices/TRS, shared meshes, core material fields, and flat
-per-face normals when absent. Authored tangents are ignored when normals are absent,
-as required by glTF. `Renderer` uploads that scene once and accepts its current
+`Application` owns the CPU scene and orbit controller. `GltfLoader` retains the
+parsed glTF document and builds a selected-scene view, including strided and
+sparse accessors, node matrices/TRS, shared meshes, core material fields, and
+primitive topology. GPU preparation generates flat per-face normals when absent,
+ignoring authored tangents in that case as required by glTF. Triangle lists,
+strips and fans with authored normals render natively; missing normals produce
+a separate triangle-list upload without changing the CPU primitive. `Renderer` uploads that scene once and accepts its current
 transforms and camera each frame. Geometry, texture, sampler, and UV-binding changes require a renderer
 rebuild. After editing material factors, alpha settings, or `doubleSided`, call
 `Renderer::updateMaterialFactors(scene)` to synchronize the GPU without rebuilding.
@@ -162,14 +164,61 @@ transformed primitive-bound centers in camera space. Intersecting transparent
 geometry can still show sorting artifacts; order-independent transparency is not
 implemented.
 
-Image-based lighting, shadow maps, animations, imported cameras/lights, selection
-gizmos, and skinning/morphing are not implemented. Non-triangle primitives, skins, and morph
-targets produce explicit load errors. Node hierarchy, authored matrix/TRS
+Image-based lighting, animations, imported cameras/lights, selection
+gizmos, and skinning/morphing are not implemented. Points/lines, skins and morph
+targets are retained on the CPU but rejected by renderer capability validation
+before replacing the open model. Node hierarchy, authored matrix/TRS
 transforms, and mesh instancing work for both `.gltf` and `.glb` files.
+
+## Directional shadows
+
+The world light casts hard shadows using **three cascades**, enabled by default.
+Each frame renders three 2048×2048 light-space depth layers before the main HDR
+scene pass. No camera depth prepass, PCF, blur, cascade blending, or screen-space
+shadow pass is used. The fragment shader performs one nearest depth comparison
+in the cascade selected by camera-space depth. Only direct world-light diffuse
+and specular illumination is shadowed; ambient and emissive terms are preserved.
+
+The **Shadows** menu controls enable/disable, distance (default 100 world units),
+strength, depth bias, slope bias, and cascade colors (near red, middle green, far
+blue). Surfaces beyond the shadow distance are unshadowed. Hard cascade
+boundaries and jagged edges are expected in this initial unfiltered version;
+bias may need tuning for scene scale and depth range.
+
+Cascade splits blend uniform and logarithmic distances (65% logarithmic), capped
+by the camera far plane. Bounding-sphere footprints and light-space texel snapping
+reduce movement shimmer. Each footprint covers a receiver slice of the camera
+frustum; its depth range also includes the scene bounds. Casters are **not**
+culled to the camera frustum: all non-guide opaque/masked instances are submitted,
+and the light volume clips rasterization. Off-screen geometry can therefore cast
+visible shadows. This conservative first version does not yet cull casters per
+cascade; very large scene bounds also reduce shadow depth precision.
+
+Masks honor base-color texture alpha, material alpha, vertex alpha, cutoff, and
+the corresponding texture/vertex-color toggles. Blended primitives receive
+shadows but do not cast them. Triangle lists/strips/fans, mirrored instances,
+and double-sided materials have matching shadow pipelines. Guides do not cast
+shadows. Maps and uniforms are separate for each frame in flight and survive
+window resizing. D32 depth uses about 96 MiB for the two sets of three maps;
+D16 is used if D32 cannot be sampled and rendered.
 
 ## CPU scene data
 
-`Scene` owns the imported data after tinygltf is destroyed:
+`Scene` separates authored data from runtime rendering data:
+
+- `gltfDocument` owns an immutable parsed `tinygltf::Model`. Include
+  `scene/GltfDocument.hpp` to inspect its complete typed fields: all scenes/nodes,
+  meshes, primitive attributes and morph targets, accessors (types, normalization,
+  strides and sparse data), buffers, materials, images, samplers, cameras, skins,
+  animations, extensions and extras. Buffer bytes and decoded image data survive
+  parser destruction. This is parsed semantic data, not a byte-exact file copy.
+- Runtime nodes link back through `sourceNode`; primitives use `sourceMesh` and
+  `sourcePrimitive`. These indices address the immutable document, independently
+  of runtime node ordering or generated guide geometry (source index -1).
+- Runtime edits affect the selected-scene view; they do not mutate the source
+  document. This retains source features that the renderer cannot yet consume.
+  The loader still validates its runtime view and rejects unsupported required
+  extensions; retaining the document does not imply rendering every feature.
 
 - `roots`, `nodes`, and each node’s `parent`/`children` describe the selected scene.
   `parent` is authoritative; `updateWorldTransforms()` refreshes the child/root lists.
@@ -177,7 +226,11 @@ transforms, and mesh instancing work for both `.gltf` and `.glb` files.
   and a list of shared primitive indices used by the renderer.
 - `primitives` own vertices/indices and retain every authored `TEXCOORD_n` and
   `COLOR_n` set. Packed vertices carry the five selected UV streams and `COLOR_0`.
-  Flat-normal generation splits triangle corners and remaps all retained streams.
+  `topology` retains glTF mode; `hasNormals` distinguishes missing normals from
+  authored values. Indexed primitives retain their compact source index order;
+  non-indexed primitives have generated sequential indices for the upload path
+  (the source document preserves the missing index accessor).
+  Renderer-only `prepareMesh()` splits corners/remaps streams for flat shading.
 - `materials` own core factors and texture bindings. Slot zero is the implicit
   glTF default material; authored material indices are offset by one.
 - Each material `SceneTexture` binding selects a `textures` index and UV set.
@@ -187,8 +240,10 @@ transforms, and mesh instancing work for both `.gltf` and `.glb` files.
 Decoded pixels are shared on the CPU, including between materials and slots with
 separate samplers. GPU textures currently belong to individual material slots;
 this allows one image to be interpreted as both color and linear data. Unused
-UV/color sets remain available on the CPU for future rendering features. This is
-a static triangle/material representation, rather than a lossless glTF document.
+UV/color sets remain available on the CPU for future rendering features. New
+features can reference the retained document without extending the parser;
+runtime caches/GPU bindings may still need to be added. Retaining both source
+buffers and decoded runtime arrays increases CPU memory use.
 
 ## Tests
 
@@ -209,6 +264,9 @@ Core material tests cover glTF and GLB defaults, emissive bindings, alpha settin
 shared images/samplers, normalized RGB/RGBA colors, multiple UV/color sets, 16-bit
 PNG decoding, flat normals, and invalid material/attribute references. Regenerate
 the fixtures with `python tests/assets/generate_core_materials.py`.
+Strip/fan tests cover indexed/non-indexed primitives, native topology, flat-normal
+fallbacks, winding parity through degenerate triangles, and retained document
+metadata. Regenerate these with `python tests/assets/generate_topologies.py`.
 
 Optional Vulkan integration checks require a working Vulkan display:
 
@@ -218,7 +276,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The renderer test exercises all blend/culling/winding variants, material-factor
+The renderer test exercises hard cascaded shadows (offscreen casters, all three
+cascades, cutouts, native topology, moving camera/light/casters, and resize),
+all blend/culling/winding variants, material-factor
 updates, loaded GLB resources, and swapchain resizing. It skips if SDL cannot
 create a Vulkan window. On X11, with Pillow and ImageMagick installed, compare
 actual framebuffer pixels using:

@@ -28,6 +28,28 @@ Scene plane() {
     scene.updateWorldTransforms();
     return scene;
 }
+Scene shadowScene() {
+    auto scene = plane();
+    scene.materials[0].baseColor = {1,1,1,1};
+    scene.materials[0].emissive = {0,0,0};
+    scene.materials[0].metallic = 0;
+    scene.materials[0].roughness = 1;
+    scene.materials.push_back(scene.materials[0]);
+    scene.materials[1].baseColor.a = 0.25f;
+    scene.images.push_back({"Cutout alpha", 1, 1, {255,255,255,64}});
+    scene.textures.push_back({"Cutout", 0, -1});
+    scene.materials[1].baseColorMap = {0,0};
+    scene.primitives.push_back(scene.primitives[0]);
+    scene.primitives[1].material = 1;
+    for (auto& vertex : scene.primitives[1].vertices) vertex.color.a = 0.5f;
+    scene.nodes.push_back(scene.nodes[0]);
+    scene.nodes[1].primitives = {1};
+    // Entirely outside the camera view, but upstream of the center receiver.
+    scene.nodes[1].local.translation = {-1.2f,0,1.5f};
+    scene.nodes[1].local.scale = {0.25f,0.25f,1};
+    scene.updateWorldTransforms();
+    return scene;
+}
 }
 int main(int argc, char** argv) {
     const bool capture = argc > 1 && std::string(argv[1]) == "--capture";
@@ -39,6 +61,8 @@ int main(int argc, char** argv) {
         // Keep legacy pixel expectations linear/clamped; exercise the new effects separately.
         const auto baselineSettings = [] {
             RenderSettings result;
+            result.shadows = false;
+            result.autoExposure = false;
             result.toneMapping = false;
             result.fxaa = false;
             return result;
@@ -63,6 +87,13 @@ int main(int argc, char** argv) {
                 if (!std::getline(std::cin, ack)) throw std::runtime_error("Capture controller disconnected");
             }
         };
+        for (std::size_t i = 0; i < 8; ++i) {
+            auto scene = GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "topologies.gltf");
+            scene.nodes[0].primitives = {i};
+            settings = baselineSettings();
+            Renderer renderer(window, scene);
+            frame("topology_" + std::to_string(i), renderer, scene);
+        }
         {
             auto scene = plane();
             Renderer renderer(window, scene);
@@ -76,6 +107,17 @@ int main(int argc, char** argv) {
             frame("post_tone_mapping_off", renderer, scene);
             settings.fxaa = false;
             frame("post_fxaa_off", renderer, scene);
+            settings = baselineSettings();
+            settings.autoExposure = true;
+            settings.exposureAdaptationSeconds = 0.001f;
+            settings.toneMapping = true;
+            frame("post_auto", renderer, scene);
+            scene.materials[0].emissive = {8, 0, 0};
+            settings.exposureAdaptationSeconds = 1.0f;
+            frame("post_auto_transition", renderer, scene);
+            settings.exposureAdaptationSeconds = 0.001f;
+            frame("post_auto_bright", renderer, scene);
+            scene.materials[0].emissive = {1, 0, 0};
             settings = baselineSettings();
             scene.materials[0].alphaMode = AlphaMode::Mask;
             frame("mask_discard", renderer, scene);
@@ -201,6 +243,87 @@ int main(int argc, char** argv) {
                 Renderer renderer(window, scene, true);
                 frame("ui_reloaded", renderer, scene, &ui);
             }
+        }
+        SDL_SetWindowSize(window, 256, 256);
+        SDL_Delay(50);
+        settings = baselineSettings();
+        settings.worldLightDirection = {0.8f,0,-1};
+        settings.ambientIntensity = 0.05f;
+        {
+            auto scene = shadowScene();
+            Renderer renderer(window, scene);
+            frame("shadow_off", renderer, scene);
+            settings.shadows = true;
+            for (const auto [distance, name] : {std::pair{30.0f, "shadow_cascade_0"},
+                    {12.0f, "shadow_cascade_1"}, {6.0f, "shadow_cascade_2"}}) {
+                settings.shadowDistance = distance;
+                frame(name, renderer, scene);
+            }
+            settings.shadowDistance = 12;
+            settings.shadowStrength = 0;
+            frame("shadow_strength_zero", renderer, scene);
+            settings.shadowStrength = 1;
+            auto& caster = scene.materials[1];
+            caster.alphaMode = AlphaMode::Mask;
+            caster.alphaCutoff = 0.5f;
+            frame("shadow_mask_discard", renderer, scene);
+            caster.alphaCutoff = 0.02f;
+            frame("shadow_mask_keep", renderer, scene);
+            caster.alphaCutoff = 0.1f;
+            frame("shadow_texture_cutout", renderer, scene);
+            settings.baseColorTextures = false;
+            frame("shadow_texture_disabled", renderer, scene);
+            caster.alphaCutoff = 0.2f;
+            frame("shadow_vertex_cutout", renderer, scene);
+            settings.vertexColors = false;
+            frame("shadow_vertex_disabled", renderer, scene);
+            caster.alphaMode = AlphaMode::Blend;
+            frame("shadow_blend_caster", renderer, scene);
+            caster.alphaMode = AlphaMode::Opaque;
+            scene.nodes[1].local.scale.x = -0.25f;
+            frame("shadow_mirrored", renderer, scene);
+            caster.doubleSided = true;
+            scene.nodes[1].local.rotation = glm::angleAxis(glm::pi<float>(), glm::vec3(0,1,0));
+            frame("shadow_double_back", renderer, scene);
+            scene.materials[0].alphaMode = AlphaMode::Blend;
+            frame("shadow_blend_receiver", renderer, scene);
+            SDL_SetWindowSize(window, 320, 240);
+            SDL_Delay(50);
+            frame("shadow_resized", renderer, scene);
+            SDL_SetWindowSize(window, 256, 256);
+            SDL_Delay(50);
+            settings.shadowDistance = 2;
+            frame("shadow_out_of_range", renderer, scene);
+            settings.shadowDistance = 12;
+            scene.nodes[1].local.translation.x = -2.5f;
+            frame("shadow_caster_moved", renderer, scene);
+            scene.nodes[1].local.translation.x = -1.2f;
+            frame("shadow_caster_returned", renderer, scene);
+            settings.worldLightDirection.x = -0.8f;
+            frame("shadow_light_moved", renderer, scene);
+            settings.worldLightDirection.x = 0.8f;
+            camera.position.z = 4;
+            frame("shadow_camera_moved", renderer, scene);
+            camera.position.z = 3;
+            scene.materials[0].emissive = {0.1f,0,0};
+            frame("shadow_emissive", renderer, scene);
+            scene.materials[0].emissive = {0,0,0};
+            settings.showShadowCascades = true;
+            frame("shadow_debug", renderer, scene);
+            settings.showShadowCascades = false;
+            settings.worldLightEnabled = false;
+            frame("shadow_light_disabled", renderer, scene);
+        }
+        settings.worldLightEnabled = true;
+        settings.baseColorTextures = true;
+        settings.vertexColors = true;
+        for (const auto topology : {PrimitiveTopology::TriangleStrip, PrimitiveTopology::TriangleFan}) {
+            auto scene = shadowScene();
+            scene.primitives[1].topology = topology;
+            scene.primitives[1].indices = topology == PrimitiveTopology::TriangleStrip ?
+                std::vector<std::uint32_t>{0,1,3,2} : std::vector<std::uint32_t>{0,1,2,3};
+            Renderer renderer(window, scene);
+            frame(topology == PrimitiveTopology::TriangleStrip ? "shadow_strip" : "shadow_fan", renderer, scene);
         }
         SDL_DestroyWindow(window);
         SDL_Quit();

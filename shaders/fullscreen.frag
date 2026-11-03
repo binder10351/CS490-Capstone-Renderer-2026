@@ -3,19 +3,24 @@
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 0) uniform sampler2D hdrScene;
+layout(std430, set = 0, binding = 1) readonly buffer ExposureHistory {
+    float adaptedEv;
+    float initialized;
+} history;
 layout(push_constant) uniform PostProcess {
     float exposure; // EV stops
     float toneMapping;
     float fxaa;
     float encodeSrgb; // Zero for sRGB attachments, which encode automatically.
+    float autoExposure;
 } settings;
 
 vec3 displayColor(vec2 uv) {
-    vec3 color = max(texture(hdrScene, uv).rgb, vec3(0.0)) * exp2(settings.exposure);
+    float exposure = settings.autoExposure > 0.5 ? exp2(history.adaptedEv) : 1.0;
+    vec3 color = max(textureLod(hdrScene, uv, 0.0).rgb, vec3(0.0)) * exposure * exp2(settings.exposure);
     if (settings.toneMapping > 0.5) {
-        // ACES fitted curve (approximation), applied to linear scene radiance.
-        color = (color * (2.51 * color + 0.03)) /
-                (color * (2.43 * color + 0.59) + 0.14);
+        // Per-channel Reinhard maps HDR radiance into the display range.
+        color = color / (vec3(1.0) + color);
     }
     return clamp(color, 0.0, 1.0);
 }

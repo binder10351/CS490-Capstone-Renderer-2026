@@ -47,6 +47,15 @@ bool ViewerUi::build(RenderSettings& settings, bool& showGuides) {
             ImGui::SliderFloat("Ambient intensity", &settings.ambientIntensity, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Shadows")) {
+            ImGui::MenuItem("Cascaded shadows", nullptr, &settings.shadows);
+            ImGui::SliderFloat("Distance", &settings.shadowDistance, 1.0f, 1000.0f, "%.1f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat("Strength", &settings.shadowStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat("Depth bias", &settings.shadowBias, 0.0f, 0.005f, "%.5f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat("Slope bias", &settings.shadowSlopeBias, 0.0f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::MenuItem("Show cascades", nullptr, &settings.showShadowCascades);
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Shading")) {
             ImGui::MenuItem("Normal mapping", nullptr, &settings.normalMapping);
             ImGui::MenuItem("Base color textures", nullptr, &settings.baseColorTextures);
@@ -60,6 +69,9 @@ bool ViewerUi::build(RenderSettings& settings, bool& showGuides) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Post process")) {
+            ImGui::MenuItem("Auto exposure", nullptr, &settings.autoExposure);
+            if (settings.autoExposure)
+                ImGui::SliderFloat("Adaptation time (s)", &settings.exposureAdaptationSeconds, 0.1f, 5.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::SliderFloat("Exposure (EV)", &settings.exposure, -8.0f, 8.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::MenuItem("Tone mapping", nullptr, &settings.toneMapping);
             ImGui::MenuItem("FXAA", nullptr, &settings.fxaa);

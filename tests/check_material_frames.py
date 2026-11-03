@@ -50,9 +50,9 @@ for name in ('opaque', 'mask_keep', 'double_back', 'mirrored_front'):
     expect(pixels[name], (255,0,0), name)
 for name in ('mask_discard', 'culled_back'):
     expect(pixels[name], srgb(background), name)
-# These uniform interior samples also verify exposure and the fitted tone curve.
+# These uniform interior samples also verify exposure and Reinhard tone mapping.
 def tone(value):
-    return max(0, min(1, value * (2.51 * value + 0.03) / (value * (2.43 * value + 0.59) + 0.14)))
+    return value / (1 + value)
 
 expect(pixels['post_tone_mapping'], srgb((tone(1), 0, 0)), 'tone mapping')
 expect(pixels['post_exposure'], srgb((tone(0.25), 0, 0)), 'exposure')
@@ -80,4 +80,34 @@ for name in ('ui', 'ui_resized', 'ui_reloaded'):
 red, green, blue = pixels['vertex_color']
 if red < 100 or red < green * 2 or red < blue * 2:
     raise AssertionError(f'Vertex color did not tint base color: {pixels["vertex_color"]}')
+
+
+# Increasing emissive radiance should preserve settled auto-exposed brightness.
+expect(pixels["post_auto_bright"], pixels["post_auto"], "auto exposure radiance compensation", tolerance=5)
+
+if pixels["post_auto_transition"][0] <= pixels["post_auto_bright"][0] + 10:
+    raise AssertionError("Auto exposure jumped to its target instead of adapting gradually")
+
+for i in range(8):
+    expect(pixels[f"topology_{i}"], (255, 0, 0), f"native topology {i}")
+
+# The caster lies outside the camera frustum in every shadow test.
+for name in ('shadow_strength_zero', 'shadow_mask_discard', 'shadow_texture_cutout',
+             'shadow_vertex_cutout', 'shadow_blend_caster', 'shadow_out_of_range',
+             'shadow_caster_moved', 'shadow_light_moved'):
+    expect(pixels[name], pixels['shadow_off'], name)
+shadowed = pixels['shadow_cascade_1']
+if pixels['shadow_off'][0] - shadowed[0] < 40:
+    raise AssertionError(f'Offscreen caster failed to shadow receiver: {pixels["shadow_off"]} -> {shadowed}')
+expect(shadowed, srgb((0.05,)*3), 'shadow preserves ambient light')
+for name in ('shadow_cascade_0', 'shadow_cascade_2', 'shadow_mask_keep', 'shadow_texture_disabled',
+             'shadow_vertex_disabled', 'shadow_mirrored', 'shadow_double_back', 'shadow_blend_receiver',
+             'shadow_resized', 'shadow_strip', 'shadow_fan', 'shadow_light_disabled',
+             'shadow_caster_returned', 'shadow_camera_moved'):
+    expect(pixels[name], shadowed, name)
+if pixels['shadow_debug'][1] <= pixels['shadow_debug'][0] + 30:
+    raise AssertionError('Second cascade debug color should be green')
+
+expect(pixels['shadow_emissive'], srgb((0.15,0.05,0.05)), 'shadows preserve emissive light')
+
 print(f'Checked {len(pixels)} Vulkan frames; captures: {output}')

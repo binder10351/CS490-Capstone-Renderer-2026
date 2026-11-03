@@ -1,0 +1,330 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "topology tests",
+    "extras": {
+      "author": "test"
+    }
+  },
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAwAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAIA/AACAPwAAgL8AAIC/AAAAAAAAgD8AAIC/AAAAAAAAgL8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgL8AAIC/AAAAAAAAgD8AAIC/AAAAAAAAgD8AAIA/AAAAAAAAgL8AAIA/AAAAAAAAAAAAAIA/AAAAQAAAQEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAABAAAAAAAAAAAAAAEBAAAAAAAAAAAA=",
+      "byteLength": 248
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 48,
+      "byteLength": 8
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 56,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 88,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 136,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 184,
+      "byteLength": 16
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 200,
+      "byteLength": 48
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3",
+      "min": [
+        0,
+        0,
+        1
+      ],
+      "max": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 4,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3",
+      "min": [
+        -1,
+        -1,
+        0
+      ],
+      "max": [
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3",
+      "min": [
+        -1,
+        -1,
+        0
+      ],
+      "max": [
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5126,
+      "count": 4,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3",
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        3,
+        0,
+        0
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "emissiveFactor": [
+        1,
+        0,
+        0
+      ]
+    }
+  ],
+  "meshes": [
+    {
+      "name": "topologies",
+      "primitives": [
+        {
+          "mode": 5,
+          "attributes": {
+            "POSITION": 3,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2,
+            "NORMAL": 0
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          },
+          "indices": 1
+        },
+        {
+          "mode": 5,
+          "attributes": {
+            "POSITION": 3,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          },
+          "indices": 1
+        },
+        {
+          "mode": 5,
+          "attributes": {
+            "POSITION": 3,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2,
+            "NORMAL": 0
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          }
+        },
+        {
+          "mode": 5,
+          "attributes": {
+            "POSITION": 3,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          }
+        },
+        {
+          "mode": 6,
+          "attributes": {
+            "POSITION": 4,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2,
+            "NORMAL": 0
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          },
+          "indices": 1
+        },
+        {
+          "mode": 6,
+          "attributes": {
+            "POSITION": 4,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          },
+          "indices": 1
+        },
+        {
+          "mode": 6,
+          "attributes": {
+            "POSITION": 4,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2,
+            "NORMAL": 0
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          }
+        },
+        {
+          "mode": 6,
+          "attributes": {
+            "POSITION": 4,
+            "TEXCOORD_0": 2,
+            "_CUSTOM": 2
+          },
+          "material": 0,
+          "extras": {
+            "label": "retained primitive metadata"
+          }
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "camera": 0,
+      "extras": {
+        "nodeTag": 42
+      }
+    },
+    {
+      "name": "unused joint"
+    }
+  ],
+  "cameras": [
+    {
+      "type": "perspective",
+      "perspective": {
+        "yfov": 0.8,
+        "znear": 0.1
+      }
+    }
+  ],
+  "animations": [
+    {
+      "samplers": [
+        {
+          "input": 5,
+          "output": 6,
+          "interpolation": "LINEAR"
+        }
+      ],
+      "channels": [
+        {
+          "sampler": 0,
+          "target": {
+            "node": 1,
+            "path": "translation"
+          }
+        }
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "joints": [
+        1
+      ],
+      "name": "retained unused skin"
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    },
+    {
+      "name": "other scene",
+      "nodes": [
+        1
+      ]
+    }
+  ],
+  "scene": 0,
+  "extras": {
+    "documentTag": "preserved"
+  }
+}

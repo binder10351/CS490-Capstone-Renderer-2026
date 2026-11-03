@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
+
+namespace tinygltf { class Model; }
 
 struct Vertex {
     glm::vec3 position{};
@@ -58,7 +61,12 @@ struct SceneMaterial {
     float alphaCutoff = 0.5f;
     bool doubleSided = false;
 };
+// Values match glTF primitive.mode; Vulkan values are translated by the renderer.
+enum class PrimitiveTopology { Points = 0, Lines, LineLoop, LineStrip, Triangles, TriangleStrip, TriangleFan };
 struct MeshPrimitive {
+    PrimitiveTopology topology = PrimitiveTopology::Triangles;
+    bool hasNormals = true; // Procedural geometry supplies normals by default.
+    int sourceMesh = -1, sourcePrimitive = -1;
     // All authored UV sets survive import; vertices contain the selected GPU streams.
     std::map<int, std::vector<glm::vec2>> texCoords;
     std::map<int, std::vector<glm::vec4>> colors;
@@ -80,8 +88,15 @@ struct SceneNode {
     glm::mat4 world{1.0f};
     std::vector<std::size_t> primitives;
     bool guide = false;
+    int sourceNode = -1;
+    int skin = -1, camera = -1;
+    std::vector<double> weights;
 };
 struct Scene {
+    // Immutable parsed file data, including all scenes/nodes/accessors, buffer bytes,
+    // cameras, skins, animations, morph targets, extensions and extras. Include
+    // GltfDocument.hpp to inspect it. Runtime arrays below are a selected-scene view.
+    std::shared_ptr<const tinygltf::Model> gltfDocument;
     // Placement of the complete imported model, independent of authored nodes.
     Transform modelTransform;
     std::vector<SceneNode> nodes;

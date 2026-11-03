@@ -1,4 +1,5 @@
 #include "scene/Camera.hpp"
+#include "renderer/PrepareMesh.hpp"
 #include "scene/GltfLoader.hpp"
 #include "app/OrbitCameraController.hpp"
 #include <iostream>
@@ -49,7 +50,7 @@ int main() {
             require(loaded.nodes[2].local.authoredMatrix.has_value(), "Authored matrix must be preserved");
             require(glm::determinant(glm::mat3(loaded.nodes[2].world)) < 0, "Mirrored scale must be preserved");
             require(close(loaded.primitives[0].vertices[1].position, {1,0,0}), "Accessor decoding");
-            require(close(loaded.primitives[0].vertices[0].normal, {0,0,1}), "Generate missing normals");
+            require(close(prepareMesh(loaded.primitives[0]).vertices[0].normal, {0,0,1}), "Generate missing normals");
             auto bounds = loaded.worldBounds();
             require(close(bounds.min, {-3,0,0}) && close(bounds.max, {4,4,0}), "World bounds across instances");
             loaded.addGuides();
@@ -71,7 +72,7 @@ int main() {
         require(normalMapped.images.at(normalMapped.textures.at(normalMaterial.normalMap.texture).image).rgba == std::vector<std::uint8_t>({200,128,240,255}), "Normal pixels must remain linear RGBA8");
         require(std::abs(normalMaterial.normalScale - 0.35f) < 1e-5f && normalMaterial.normalMap.texCoord == 1, "Import normal scale and UV selection");
         require(normalMapped.primitives[0].vertices[1].uv == glm::vec2(1,0), "Use the normal texture's selected UV set");
-        require(normalMapped.primitives[0].vertices[0].tangent == glm::vec4(0), "Ignore authored tangents when normals are missing");
+        require(prepareMesh(normalMapped.primitives[0]).vertices[0].tangent == glm::vec4(0), "Ignore authored tangents when normals are missing");
         require(!Scene::cube().materials[0].normalMap.present(), "Untextured materials must retain mesh normals");
         rejects([] { (void)GltfLoader{}.load(std::filesystem::path(TEST_ASSET_DIR) / "normal_map_missing_uv.gltf"); });
         for (const char* name : {"pbr_material.gltf", "pbr_material.glb"}) {

@@ -34,17 +34,7 @@ layout(set = 0, binding = 1, std140) uniform LightingUniforms {
     vec4 shadingOptions;
 } lighting;
 
-layout(set = 1, binding = 0, std140) uniform MaterialUniforms {
-    vec4 baseColorFactor;
-    // Metallic factor, roughness factor, occlusion strength, unused.
-    vec4 metallicRoughnessOcclusion;
-    vec4 emissiveFactor;
-    // Normal scale, normal-map presence, unused, unused.
-    vec4 normalParameters;
-    // Alpha mode (0 opaque, 1 mask, 2 blend), cutoff,
-    // double-sided flag, unused.
-    vec4 alphaParameters;
-} material;
+#include "material_uniforms.glsl"
 
 // Material textures: color maps are decoded to linear RGB by the texture
 // format.

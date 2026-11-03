@@ -8,6 +8,7 @@
 // world-space position is supplied separately from the viewProjection matrix.
 
 #include "mesh_fragment.glsl"
+#include "shadow_sampling.glsl"
 
 const float PI = 3.14159265359;
 
@@ -60,9 +61,10 @@ void main() {
     for (uint i = 0u; i < count; ++i) {
         const LightSample light = sampleLight(
             lighting.lights[i], inWorldPosition);
-        color += evaluateGgx(surface, normal, viewDirection, light);
+        float visibility = i == 0u ? worldLightVisibility() : 1.0;
+        color += visibility * evaluateGgx(surface, normal, viewDirection, light);
     }
 
     color += surface.emissive;
-    outColor = vec4(color, surface.baseColor.a);
+    outColor = vec4(showCascade(color), surface.baseColor.a);
 }

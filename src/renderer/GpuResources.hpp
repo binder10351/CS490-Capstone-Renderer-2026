@@ -10,6 +10,7 @@ struct GpuBuffer {
     void* mappedData = nullptr; // VMA-owned persistent mapping for host-updated buffers.
 };
 struct GpuMesh {
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;
 

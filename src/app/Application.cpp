@@ -56,6 +56,7 @@ void Application::loadModel(const std::filesystem::path& modelPath) {
             throw std::runtime_error("Choose a .gltf or .glb model file.");
         }
         nextScene = GltfLoader{}.load(modelPath);
+        Renderer::validateScene(nextScene);
         reportWarnings(nextScene);
         nextScene.addGuides();
     } catch (const std::exception& error) {
