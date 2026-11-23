@@ -7,6 +7,28 @@ int shadowCascade() {
     return depth <= shadows.splitDepths.x ? 0 : (depth <= shadows.splitDepths.y ? 1 : 2);
 }
 
+float filteredShadowVisibility(vec2 uv, int cascade, float depth) {
+    vec2 mapSize = vec2(textureSize(shadowMaps, 0).xy);
+    // Center the kernel on the receiver, interpolating its weights as it moves
+    // between texels. A fixed nearest-sampled grid would still move in steps.
+    vec2 texelPosition = uv * mapSize - 0.5;
+    vec2 base = floor(texelPosition);
+    vec2 fraction = fract(texelPosition);
+    float visibility = 0.0;
+    for (int y = -1; y <= 2; ++y) {
+        for (int x = -1; x <= 2; ++x) {
+            vec2 offset = vec2(x, y);
+            vec2 weight = max(vec2(0.0), vec2(2.0) - abs(offset - fraction));
+            vec2 sampleUv = (base + offset + 0.5) / mapSize;
+            // Explicit gradients avoid derivatives across cascade/coverage branches.
+            visibility += weight.x * weight.y * textureGrad(shadowMaps,
+                vec4(sampleUv, float(cascade), depth), vec2(0.0), vec2(0.0));
+        }
+    }
+    // Each axis's tent weights sum to four. Average comparisons, not depths.
+    return visibility / 16.0;
+}
+
 float worldLightVisibility() {
     if (shadows.options.x < 0.5) return 1.0;
     int cascade = shadowCascade();
@@ -21,8 +43,7 @@ float worldLightVisibility() {
     vec3 lightDirection = normalize(-lighting.lights[0].positionOrDirection.xyz);
     float slope = 1.0 - abs(dot(normal, lightDirection));
     float bias = shadows.options.z * (1.0 + 2.0 * slope);
-    // Explicit gradients avoid implicit derivatives across cascade/coverage branches.
-    float visibility = textureGrad(shadowMaps, vec4(uv, float(cascade), coordinate.z - bias), vec2(0.0), vec2(0.0));
+    float visibility = filteredShadowVisibility(uv, cascade, coordinate.z - bias);
     return mix(1.0, visibility, shadows.options.y);
 }
 

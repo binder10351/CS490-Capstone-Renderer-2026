@@ -72,7 +72,8 @@ void Renderer::createShadowResources() {
             .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
             .compareEnable = VK_TRUE, .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
             .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE};
-        checkShadow(vkCreateSampler(device_, &sampler, nullptr, &frame.map.sampler), "Creating hard-shadow sampler");
+        // PCF weights and depth comparisons are combined in shadow_sampling.glsl.
+        checkShadow(vkCreateSampler(device_, &sampler, nullptr, &frame.map.sampler), "Creating shadow comparison sampler");
         for (std::uint32_t layer = 0; layer < shadowCascadeCount; ++layer) {
             view.viewType = VK_IMAGE_VIEW_TYPE_2D;
             view.subresourceRange.baseArrayLayer = layer;

@@ -172,18 +172,20 @@ transforms, and mesh instancing work for both `.gltf` and `.glb` files.
 
 ## Directional shadows
 
-The world light casts hard shadows using **three cascades**, enabled by default.
+The world light casts PCF-filtered shadows using **three cascades**, enabled by default.
 Each frame renders three 2048×2048 light-space depth layers before the main HDR
-scene pass. No camera depth prepass, PCF, blur, cascade blending, or screen-space
-shadow pass is used. The fragment shader performs one nearest depth comparison
-in the cascade selected by camera-space depth. Only direct world-light diffuse
+scene pass. The fragment shader averages 16 depth comparisons in a 4×4 tent PCF
+kernel, with weights that vary smoothly between shadow texels, in the cascade
+selected by camera-space depth. No extra render pass is needed. Only direct world-light diffuse
 and specular illumination is shadowed; ambient and emissive terms are preserved.
 
 The **Shadows** menu controls enable/disable, distance (default 100 world units),
 strength, depth bias, slope bias, and cascade colors (near red, middle green, far
-blue). Surfaces beyond the shadow distance are unshadowed. Hard cascade
-boundaries and jagged edges are expected in this initial unfiltered version;
-bias may need tuning for scene scale and depth range.
+blue). Surfaces beyond the shadow distance are unshadowed. Filtering softens
+shadow-map stair stepping; cascade boundaries can still be visible, and bias
+may need tuning for scene scale and depth range. The filter has a fixed texel
+footprint, so distant cascades have a wider world-space softness. Cascade blending
+and contact hardening are not implemented.
 
 Cascade splits blend uniform and logarithmic distances (65% logarithmic), capped
 by the camera far plane. Bounding-sphere footprints and light-space texel snapping
@@ -276,7 +278,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The renderer test exercises hard cascaded shadows (offscreen casters, all three
+The renderer test exercises cascaded shadows (offscreen casters, all three
 cascades, cutouts, native topology, moving camera/light/casters, and resize),
 all blend/culling/winding variants, material-factor
 updates, loaded GLB resources, and swapchain resizing. It skips if SDL cannot

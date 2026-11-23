@@ -56,7 +56,7 @@ sampler filtering and wrapping. Missing color/data textures bind white so scalar
 material factors remain effective. Base-color samples multiply the linear color
 factor, and metallic/roughness samples multiply their scalar factors. AO strength
 interpolates between unoccluded ambient and the sampled occlusion; direct light
-is unaffected. Image-based lighting and shadow maps are not yet implemented.
+is unaffected. Image-based lighting is not yet implemented.
 
 `MaterialUniforms` is 80 bytes: five `vec4`s containing base color,
 metallic/roughness/AO strength, emissive, normal scale/presence, and alpha
@@ -108,11 +108,14 @@ and mirrored/double-sided variants. The mask pass shares `material_uniforms.glsl
 with the scene shaders and applies the same alpha factor/texture/vertex cutoff.
 Blended meshes and guides do not cast. No camera depth prepass is required.
 
-`shadow_sampling.glsl` selects a cascade by camera depth and performs one nearest
-comparison, with explicit zero gradients (only mip 0 exists). It shadows the
+`shadow_sampling.glsl` selects a cascade by camera depth and averages 16 nearest
+comparisons in a 4×4 tent PCF kernel. Separable weights vary continuously with
+subtexel position and sum to 16, preserving fully lit/shadowed interiors. Offsets
+use the actual map dimensions; the white comparison border keeps outside taps
+lit. Explicit zero gradients select mip 0. It shadows the
 world light's direct contribution in both GGX and Blinn–Phong; ambient/emissive
-are unaffected. Out-of-range receivers remain lit. There is no filtering,
-cascade blending, or contact hardening. The debug overlay colors the three
+are unaffected. Out-of-range receivers remain lit. There is no
+cascade blending or contact hardening. The debug overlay colors the three
 cascade intervals. Shadow transforms use the same Vulkan [0,1] depth convention
 and one clip-space Y flip as the main pass.
 
